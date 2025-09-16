@@ -37,11 +37,17 @@ app.use(express.json());
 app.use(rateLimiter);
 
 // Session configuration (kept minimal for compatibility with middleware)
+// Security: Removed insecure fallback - SESSION_SECRET is mandatory
 app.use(
   session({
-    secret: env.SESSION_SECRET || "your-secret-key",
+    secret: env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    cookie: {
+      secure: env.NODE_ENV === "production", // HTTPS only in production
+      httpOnly: true, // Prevent XSS attacks
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
   })
 );
 
@@ -256,21 +262,33 @@ function setupRoutes(agent: ConfiguredAgent, dbConnection: DataSource) {
 
   // Removed permissions check endpoint (hierarchy-specific)
 
-  // Serve test page
+  // Serve password authentication test page
   app.get("/test", (req, res) => {
-    const testPagePath = path.join(publicPath, "test.html");
-    console.log("Serving test page from:", testPagePath);
-    console.log("File exists:", fs.existsSync(testPagePath));
-    res.sendFile(testPagePath);
+    const passwordAuthPagePath = path.join(
+      publicPath,
+      "password-auth-test.html"
+    );
+    console.log("Serving password auth test page from:", passwordAuthPagePath);
+    console.log("File exists:", fs.existsSync(passwordAuthPagePath));
+    res.sendFile(passwordAuthPagePath);
   });
 
   // Removed hierarchy demo routes
 
   // Removed legacy password-auth test page route
 
-  // Root route
+  // Serve password authentication test page directly
+  app.get("/password-auth-test.html", (req, res) => {
+    const passwordAuthPagePath = path.join(
+      publicPath,
+      "password-auth-test.html"
+    );
+    res.sendFile(passwordAuthPagePath);
+  });
+
+  // Root route - redirect to password auth test page
   app.get("/", (req, res) => {
-    res.redirect("/test");
+    res.redirect("/password-auth-test.html");
   });
 
   // Health check endpoint

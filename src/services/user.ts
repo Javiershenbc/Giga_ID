@@ -178,9 +178,9 @@ export class UserService {
 
       logger.info(`Created credential: ${JSON.stringify(credential)}`);
 
-      // Encrypt the credential
+      // Encrypt the credential using SecretManager
       const encryptedCredential =
-        this.credentialStorage.encryptCredential(credential);
+        await this.credentialStorage.encryptCredential(credential);
       logger.info(
         `Encrypted credential of length: ${encryptedCredential.length}`
       );
@@ -317,9 +317,9 @@ export class UserService {
         throw new Error("User not found");
       }
 
-      // Encrypt the credential
+      // Encrypt the credential using SecretManager
       const encryptedCredential =
-        this.credentialStorage.encryptCredential(credential);
+        await this.credentialStorage.encryptCredential(credential);
 
       // Parse existing credentials or initialize as empty array
       let credentialsArray: string[] = [];
@@ -407,8 +407,9 @@ export class UserService {
           logger.info(
             `Decrypting credential of length ${encryptedCred.length}`
           );
-          const decrypted =
-            this.credentialStorage.decryptCredential(encryptedCred);
+          const decrypted = await this.credentialStorage.decryptCredential(
+            encryptedCred
+          );
           logger.info(
             `Successfully decrypted credential with ID: ${decrypted.id}`
           );

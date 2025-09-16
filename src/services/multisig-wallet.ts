@@ -11,6 +11,7 @@ import { User } from "../models/user.js";
 import { ConfiguredAgent } from "../agent/setup.js";
 import { logger } from "../utils/logger.js";
 import { env } from "../config/env.js";
+import { secretManager } from "./secret-manager.js";
 
 // Re-export types for use by other modules
 export {
@@ -359,57 +360,81 @@ export class MultisigWalletService {
   }
 
   /**
-   * Encrypt signer private key for storage
+   * Encrypt signer private key for storage using SecretManager
+   * Security: Replaced insecure fallback with SecretManager
    */
   private async encryptSignerPrivateKey(privateKey: string): Promise<string> {
-    const crypto = await import("crypto");
-    const secretKey = env.SECRET_KEY || "default-secret";
+    try {
+      // Generate a unique identifier for this signer key
+      const identifier = `signer-key-${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2)}`;
 
-    // AES-256-GCM with random IV and auth tag
-    const algorithm = "aes-256-gcm";
-    const key = crypto.scryptSync(secretKey, "salt", 32);
-    const iv = crypto.randomBytes(12); // 96-bit IV recommended for GCM
-    const cipher = crypto.createCipheriv(algorithm, key, iv);
+      // Use SecretManager for secure encryption
+      const encryptedKey = await secretManager.storePrivateKey(
+        identifier,
+        privateKey
+      );
 
-    const encrypted = Buffer.concat([
-      cipher.update(Buffer.from(privateKey, "utf8")),
-      cipher.final(),
-    ]);
-    const authTag = cipher.getAuthTag();
-
-    // Return iv:tag:ciphertext as hex
-    return [
-      iv.toString("hex"),
-      authTag.toString("hex"),
-      encrypted.toString("hex"),
-    ].join(":");
+      // Store the identifier with the encrypted data so we can retrieve it later
+      return `${identifier}:${encryptedKey}`;
+    } catch (error) {
+      logger.error("Failed to encrypt signer private key:", error);
+      throw new Error("Private key encryption failed");
+    }
   }
 
   /**
-   * Decrypt signer private key
+   * Decrypt signer private key using SecretManager
+   * Security: Replaced insecure fallback with SecretManager
    */
   async decryptSignerPrivateKey(encryptedKey: string): Promise<string> {
     try {
-      const crypto = await import("crypto");
-      const secretKey = env.SECRET_KEY || "default-secret";
+      // Check if this is the new format (identifier:encryptedData)
+      if (encryptedKey.includes(":") && encryptedKey.split(":").length >= 4) {
+        // New format: identifier:iv:authTag:ciphertext
+        const parts = encryptedKey.split(":");
+        const identifier = parts[0];
+        const encryptedData = parts.slice(1).join(":");
 
-      const [ivHex, tagHex, encHex] = encryptedKey.split(":");
-      const iv = Buffer.from(ivHex, "hex");
-      const authTag = Buffer.from(tagHex, "hex");
-      const ciphertext = Buffer.from(encHex, "hex");
-      const key = crypto.scryptSync(secretKey, "salt", 32);
+        // Use SecretManager for secure decryption
+        return await secretManager.retrievePrivateKey(
+          identifier,
+          encryptedData
+        );
+      } else {
+        // Legacy format - handle old encryption method for backward compatibility
+        logger.warn(
+          "Using legacy decryption method - consider migrating to SecretManager"
+        );
 
-      const algorithm = "aes-256-gcm";
-      const decipher = crypto.createDecipheriv(algorithm, key, iv);
-      decipher.setAuthTag(authTag);
+        const crypto = await import("crypto");
 
-      const decrypted = Buffer.concat([
-        decipher.update(ciphertext),
-        decipher.final(),
-      ]);
-      return decrypted.toString("utf8");
+        // Parse the encrypted data (legacy format: iv:authTag:ciphertext)
+        const [ivHex, tagHex, encHex] = encryptedKey.split(":");
+        if (!ivHex || !tagHex || !encHex) {
+          throw new Error("Invalid encrypted key format");
+        }
+
+        const iv = Buffer.from(ivHex, "hex");
+        const authTag = Buffer.from(tagHex, "hex");
+        const ciphertext = Buffer.from(encHex, "hex");
+
+        // Use SECRET_KEY directly (no fallback for security)
+        const key = crypto.scryptSync(env.SECRET_KEY, "salt", 32);
+        const algorithm = "aes-256-gcm";
+        const decipher = crypto.createDecipheriv(algorithm, key, iv);
+        decipher.setAuthTag(authTag);
+
+        const decrypted = Buffer.concat([
+          decipher.update(ciphertext),
+          decipher.final(),
+        ]);
+        return decrypted.toString("utf8");
+      }
     } catch (error) {
-      throw new Error("Failed to decrypt signer private key");
+      logger.error("Failed to decrypt signer private key:", error);
+      throw new Error("Private key decryption failed");
     }
   }
 

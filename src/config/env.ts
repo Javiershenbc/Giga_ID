@@ -12,13 +12,13 @@ export const env = cleanEnv(process.env, {
     default: "development",
   }),
 
-  // Security
+  // Security - Enhanced validation for SecretManager
   SECRET_KEY: str({
-    desc: "Secret key for encryption",
+    desc: "Master secret key for encryption (minimum 32 characters)",
     default:
       process.env.NODE_ENV === "production"
         ? undefined // Force explicit setting in production
-        : "dev-secret-key-change-in-production",
+        : "dev-secret-key-change-in-production-min-32-chars",
   }),
   SESSION_SECRET: str({
     default:

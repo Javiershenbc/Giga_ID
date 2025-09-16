@@ -93,9 +93,33 @@ export async function createApp(agent: ConfiguredAgent) {
     }
   });
 
-  // Root route
+  // Serve password authentication test page directly
+  app.get("/password-auth-test.html", (req, res) => {
+    try {
+      const passwordAuthPagePath = path.join(
+        process.cwd(),
+        "src",
+        "public",
+        "password-auth-test.html"
+      );
+
+      logger.debug("Serving password auth page from:", passwordAuthPagePath);
+      logger.debug("File exists:", fs.existsSync(passwordAuthPagePath));
+
+      if (fs.existsSync(passwordAuthPagePath)) {
+        res.sendFile(passwordAuthPagePath);
+      } else {
+        res.status(404).send("Password auth test page not found");
+      }
+    } catch (error) {
+      logger.error("Error serving password auth page:", error);
+      res.status(500).send("Internal server error");
+    }
+  });
+
+  // Root route - redirect to password auth test page
   app.get("/", (req, res) => {
-    res.redirect("/test");
+    res.redirect("/password-auth-test.html");
   });
 
   // Health check route

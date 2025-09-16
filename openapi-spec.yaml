@@ -1,0 +1,544 @@
+openapi: 3.0.3
+info:
+  title: GigaID API
+  description: |
+    # GigaID Decentralized Identity and Credential Management System
+
+    GigaID is a decentralized identity system that combines DIDs (Decentralized Identifiers),
+    Verifiable Credentials, and Ethereum blockchain integration for authentication and
+    wallet operations (including multisig via Safe).
+
+    ## Key Features
+    - **DIDs**: DID creation and resolution via did:ethr
+    - **Verifiable Credentials**: Issue and verify JWT-based credentials
+    - **Authentication**: Password-based (with optional WebAuthn add-on) using JWT
+    - **Blockchain Integration**: Balance, ETH transfers, Safe multisig flows
+    - **API Key Authentication**: Issue credentials via x-api-key or JWT
+
+        ## Authentication
+
+    The API uses JWT (JSON Web Token) based authentication:
+
+    1. **JWT Bearer Token**: Include `Authorization: Bearer <token>` header
+    2. **Session-based**: Traditional session cookies (legacy WebAuthn only)
+
+  version: 1.0.0
+  contact:
+    name: UNICEF Giga Initiative
+    url: https://giga.global
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://gigaidpoc-production.up.railway.app
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User registration, login, and token management
+  - name: Credentials
+    description: Issue and verify verifiable credentials (generic)
+  - name: Multisig
+    description: Multisig wallet registration, association, and utilities
+  - name: Blockchain
+    description: Ethereum wallet and transaction management
+  - name: System
+    description: System information and utilities
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from login endpoints
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: API key for credential issuance without user session
+
+  schemas:
+    # Authentication Schemas
+    UserRegistration:
+      type: object
+      required: [username, email, displayName, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          example: "john@example.com"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: "John Doe"
+        password:
+          type: string
+          minLength: 6
+          maxLength: 100
+          example: "secure123456"
+
+    UserLogin:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: "john_doe"
+        password:
+          type: string
+          example: "secure123456"
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "User registered successfully"
+        user:
+          $ref: "#/components/schemas/User"
+        auth:
+          $ref: "#/components/schemas/AuthTokens"
+
+    AuthTokens:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT access token
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        refreshToken:
+          type: string
+          description: JWT refresh token
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        tokenType:
+          type: string
+          example: "Bearer"
+        expiresIn:
+          type: string
+          example: "24h"
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        username:
+          type: string
+          example: "john_doe"
+        email:
+          type: string
+          format: email
+          example: "john@example.com"
+        displayName:
+          type: string
+          example: "John Doe"
+        did:
+          type: string
+          example: "did:ethr:0x..."
+        authMethod:
+          type: string
+          enum: [webauthn, password, hybrid]
+          example: "password"
+
+# Security applied to all endpoints by default (JWT Bearer Token)
+security:
+  - bearerAuth: []
+
+paths:
+  # Authentication Endpoints
+  /api/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      description: Register a new user with password authentication and optionally link a multisig wallet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/UserRegistration"
+                - type: object
+                  properties:
+                    multisigWalletAddress:
+                      type: string
+                      description: Optional Safe address to associate at registration
+                      example: "0x1234567890abcdef1234567890abcdef12345678"
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+        "409":
+          description: Username already exists
+
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      description: Authenticate user and receive JWT tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserLogin"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid credentials
+
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      description: Use refresh token to get new access token
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token refreshed successfully
+
+  # Removed organization endpoints
+
+  # Credentials (Generic)
+  /api/credentials/issue:
+    post:
+      tags: [Credentials]
+      summary: Issue a generic verifiable credential (JWT)
+      description: Issue a Verifiable Credential JWT from issuer DID to subject DID
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issuerDid, subjectDid, type, context, claims]
+              properties:
+                issuerDid:
+                  type: string
+                  example: "did:ethr:0xIssuer"
+                subjectDid:
+                  type: string
+                  example: "did:ethr:0xSubject"
+                type:
+                  type: array
+                  items:
+                    type: string
+                  example: ["VerifiableCredential", "ExampleCredential"]
+                context:
+                  type: array
+                  items:
+                    type: string
+                  example:
+                    [
+                      "https://www.w3.org/2018/credentials/v1",
+                      "https://schema.org",
+                    ]
+                claims:
+                  type: object
+                  additionalProperties: true
+                  example: { name: "Alice" }
+      responses:
+        "200":
+          description: Credential issued successfully
+
+  /api/credentials/verify:
+    post:
+      tags: [Credentials]
+      summary: Verify a credential
+      description: Verify the authenticity and validity of a verifiable credential
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                credential:
+                  type: string
+                  description: "JWT-encoded verifiable credential"
+      responses:
+        "200":
+          description: Credential verification result
+
+  # Removed issued/received endpoints (hierarchy-specific)
+
+  # User Management Endpoints
+  /api/hierarchy/users/available:
+    get:
+      tags: [Users]
+      summary: Get available users
+      description: Retrieve users that can be associated with organizations
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Available users retrieved successfully
+
+  /api/hierarchy/permissions/user/{username}:
+    get:
+      tags: [Users]
+      summary: Get user permissions by username
+      description: Retrieve detailed permissions for a specific user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User permissions retrieved successfully
+
+  /api/hierarchy/can-send-transactions:
+    get:
+      tags: [Users]
+      summary: Check transaction permissions
+      description: Check if the authenticated user can send Ethereum transactions based on wallet balance
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Transaction permission status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      canSendTransactions:
+                        type: boolean
+                        description: Whether user can send transactions
+                        example: true
+                      balance:
+                        type: string
+                        description: Current ETH balance
+                        example: "0.005"
+                      minGasRequired:
+                        type: string
+                        description: Minimum ETH required for gas
+                        example: "0.00002"
+                      reason:
+                        type: string
+                        description: Explanation of permission status
+                        example: "Sufficient balance for transaction fees"
+        "401":
+          description: Unauthorized
+
+  # Blockchain Endpoints
+  /api/balance:
+    get:
+      tags: [Blockchain]
+      summary: Get user's ETH balance
+      description: Retrieve the current Ethereum balance and address for the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Balance retrieved successfully
+
+  /api/send-transaction:
+    post:
+      tags: [Blockchain]
+      summary: Send Ethereum transaction
+      description: Send an Ethereum transaction from the user's wallet (EOA or multisig signer)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, amount]
+              properties:
+                to:
+                  type: string
+                  minLength: 42
+                  maxLength: 42
+                  example: "0x742d35Cc6635C0532925a3b8D400900f"
+                amount:
+                  type: string
+                  example: "0.1"
+                gasLimit:
+                  type: string
+                  example: "21000"
+                gasPrice:
+                  type: string
+                  example: "20000000000"
+                overrideSignerPrivateKey:
+                  type: string
+                  description: Optional 64-hex private key to override signer for this call
+                  example: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                useServerSecretAsSigner:
+                  type: boolean
+                  description: If true, uses SECRET_KEY from server env as signer
+                  example: false
+      responses:
+        "200":
+          description: Transaction sent successfully
+
+  /api/transaction/{txHash}:
+    get:
+      tags: [Blockchain]
+      summary: Get transaction status
+      description: Retrieve the status of a specific transaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: txHash
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "0x1234567890abcdef..."
+      responses:
+        "200":
+          description: Transaction status retrieved successfully
+
+  /api/propose-transaction:
+    post:
+      tags: [Blockchain]
+      summary: Propose Safe transaction (owner)
+      description: Propose a transaction to the linked Safe (requires owner context)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, amount]
+              properties:
+                to:
+                  type: string
+                  example: "0x742d35Cc6635C0532925a3b8D400900f"
+                amount:
+                  type: string
+                  example: "0.01"
+                gasLimit:
+                  type: string
+                  example: "21000"
+                gasPrice:
+                  type: string
+                  example: "20000000000"
+                overrideSignerPrivateKey:
+                  type: string
+                  description: Optional 64-hex private key to override signer for this call
+                useServerSecretAsSigner:
+                  type: boolean
+                  example: false
+      responses:
+        "200":
+          description: Safe transaction proposed
+
+  /api/propose-transaction-delegate:
+    post:
+      tags: [Blockchain]
+      summary: Propose Safe transaction (delegate)
+      description: Propose a transaction to the linked Safe as delegate (not owner)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, amount]
+              properties:
+                to:
+                  type: string
+                  example: "0x742d35Cc6635C0532925a3b8D400900f"
+                amount:
+                  type: string
+                  example: "0.01"
+                gasLimit:
+                  type: string
+                  example: "21000"
+                gasPrice:
+                  type: string
+                  example: "20000000000"
+                overrideSignerPrivateKey:
+                  type: string
+                useServerSecretAsSigner:
+                  type: boolean
+                  example: false
+      responses:
+        "200":
+          description: Safe transaction proposed as delegate
+
+  /api/multisig/transactions/pending:
+    get:
+      tags: [Multisig]
+      summary: List pending multisig transactions
+      description: Pending Safe transactions for the user's linked wallet
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Pending transactions listed
+
+  # System Information Endpoints
+  # Removed hierarchy system summary
+
+  /api/did-preview:
+    post:
+      tags: [System]
+      summary: Generate DID preview
+      description: Generate a preview of a DID for a given username without creating the user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  example: "preview_user"
+      responses:
+        "200":
+          description: DID preview generated successfully
+
+  # Legacy WebAuthn Endpoints removed

@@ -149,38 +149,51 @@ export class MultisigWalletService {
         throw new Error("Multisig wallet not found");
       }
 
-      // Generate or validate signer key
-      let signerKeyPair: SignerKeyPair;
+      // Decide signer behavior: provide, generate, reuse existing, or none
+      let newEncryptedSignerKey: string | undefined;
+      let newSignerAddress: string | undefined;
+      let willUpdateSigner = false;
 
       if (params.signerPrivateKey) {
         // Use provided signer key
-        signerKeyPair = this.validateSignerKey(params.signerPrivateKey);
+        const signerKeyPair = this.validateSignerKey(params.signerPrivateKey);
+        newEncryptedSignerKey = await this.encryptSignerPrivateKey(
+          signerKeyPair.privateKey
+        );
+        newSignerAddress = signerKeyPair.address;
+        willUpdateSigner = true;
       } else if (params.generateSigner) {
         // Generate new signer key
-        signerKeyPair = this.generateSignerKeyPair();
-      } else {
-        throw new Error(
-          "Must provide either signerPrivateKey or set generateSigner to true"
+        const signerKeyPair = this.generateSignerKeyPair();
+        newEncryptedSignerKey = await this.encryptSignerPrivateKey(
+          signerKeyPair.privateKey
         );
+        newSignerAddress = signerKeyPair.address;
+        willUpdateSigner = true;
+      } else if (user.signerPrivateKey && user.signerAddress) {
+        // Reuse existing signer (no changes needed)
+        willUpdateSigner = false;
+      } else {
+        // No signer provided/requested and none stored -> proceed without signer
+        willUpdateSigner = false;
       }
 
-      // Encrypt the signer private key
-      const encryptedSignerKey = await this.encryptSignerPrivateKey(
-        signerKeyPair.privateKey
-      );
-
-      // Update user with multisig association
+      // Update user with multisig association (and signer only if changed)
       user.multisigWalletId = wallet.id;
-      user.signerPrivateKey = encryptedSignerKey;
-      user.signerAddress = signerKeyPair.address;
       user.isMultisigEnabled = true;
+      if (willUpdateSigner) {
+        user.signerPrivateKey = newEncryptedSignerKey;
+        user.signerAddress = newSignerAddress;
+      }
 
       const updatedUser = await this.userRepository.save(user);
 
       logger.info(
         `Associated user ${user.username} with multisig wallet ${wallet.address}`
       );
-      logger.info(`Generated signer address: ${signerKeyPair.address}`);
+      if (willUpdateSigner && newSignerAddress) {
+        logger.info(`Using signer address: ${newSignerAddress}`);
+      }
 
       return updatedUser;
     } catch (error) {

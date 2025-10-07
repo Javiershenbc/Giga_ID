@@ -150,7 +150,7 @@ export class TransactionService {
         maxFeePerGas: feeData.maxFeePerGas?.toString(),
         maxPriorityFeePerGas: feeData.maxPriorityFeePerGas?.toString(),
         nonce: await this.provider.getTransactionCount(fromAddress, "pending"),
-        chainId: env.ETH_NETWORK === "sepolia" ? 11155111 : 1, // Sepolia: 11155111, Mainnet: 1
+        chainId: this.getChainId(),
         type: 2, // EIP-1559 transaction type
       };
 

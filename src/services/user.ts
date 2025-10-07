@@ -254,6 +254,8 @@ export class UserService {
           "authMethod",
           "passwordHash",
           "credentials",
+          "organizationId",
+          "organizationRole",
           "multisigWalletId",
           "signerAddress",
           "isMultisigEnabled",
@@ -448,6 +450,7 @@ export class UserService {
     try {
       return await this.userRepository.findOne({
         where: { id },
+        relations: ["organization"],
         select: [
           "id",
           "username",
@@ -455,6 +458,8 @@ export class UserService {
           "displayName",
           "did",
           "authMethod",
+          "organizationId",
+          "organizationRole",
           "multisigWalletId",
           "signerAddress",
           "isMultisigEnabled",

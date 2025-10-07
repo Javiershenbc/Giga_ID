@@ -38,7 +38,7 @@ export const env = cleanEnv(process.env, {
   }),
   ETH_NETWORK: str({
     choices: ["mainnet", "goerli", "sepolia", "base", "base-sepolia"],
-    default: "sepolia",
+    default: "base-sepolia",
   }),
   // Optional explicit RPC URL override (required for Base networks)
   RPC_URL: str({ default: "" }),

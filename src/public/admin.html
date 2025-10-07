@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GigaID Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/admin.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">GigaID</div>
+      <div class="actions">
+        <button id="logoutBtn" class="btn btn-secondary" disabled>
+          Logout
+        </button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card" id="loginCard">
+        <h2>Sign in</h2>
+        <div class="grid-2">
+          <div class="field">
+            <label for="username">Username</label>
+            <input id="username" type="text" placeholder="demo_user" />
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" type="password" placeholder="••••••••" />
+          </div>
+        </div>
+        <div class="row">
+          <button id="loginBtn" class="btn">Login</button>
+        </div>
+        <p class="hint">After login, actions and data panels will unlock.</p>
+      </section>
+
+      <section class="grid-3" id="infoGrid" style="display: none">
+        <div class="card">
+          <h3>Account</h3>
+          <div class="kv"><span>User</span><code id="kvUser">-</code></div>
+          <div class="kv"><span>Email</span><code id="kvEmail">-</code></div>
+          <div class="kv"><span>DID</span><code id="kvDID">-</code></div>
+          <div class="kv"><span>Auth</span><code id="kvAuth">-</code></div>
+          <div class="kv">
+            <span>Signer EOA</span><code id="kvSigner">-</code>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Wallet</h3>
+          <div class="kv">
+            <span>Address</span><code id="kvAddress">-</code>
+          </div>
+          <div class="kv">
+            <span>Network</span><code id="kvNetwork">-</code>
+          </div>
+          <div class="kv">
+            <span>Balance</span><code id="kvBalance">-</code>
+          </div>
+          <div class="row">
+            <button id="btnRefreshBalance" class="btn btn-secondary" disabled>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Multisig</h3>
+          <div class="field">
+            <label for="msafe">Safe Address</label>
+            <input id="msafe" type="text" placeholder="0x..." />
+          </div>
+          <div class="field">
+            <label for="msSignerPk">Signer Private Key (optional)</label>
+            <input
+              id="msSignerPk"
+              type="password"
+              placeholder="0x... (64 hex)"
+            />
+          </div>
+          <label class="check">
+            <input id="msGenerateEOA" type="checkbox" />
+            Generate server EOA (delegate signer)
+          </label>
+          <div class="row">
+            <button id="btnAssociate" class="btn" disabled>Associate</button>
+            <button id="btnShowConfig" class="btn btn-secondary" disabled>
+              Show Config
+            </button>
+          </div>
+          <div class="row">
+            <button id="btnPending" class="btn btn-secondary" disabled>
+              Pending Safe Tx
+            </button>
+            <button id="btnRegisterSafe" class="btn btn-warning" disabled>
+              Register Safe
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="actionsCard" style="display: none">
+        <h3>Quick Actions</h3>
+        <div class="grid-3">
+          <div class="field">
+            <label for="toAddress">Send: To</label>
+            <input id="toAddress" type="text" placeholder="0x..." />
+          </div>
+          <div class="field">
+            <label for="amount">Amount (ETH)</label>
+            <input
+              id="amount"
+              type="number"
+              step="0.000001"
+              placeholder="0.001"
+            />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button id="btnSend" class="btn btn-success" disabled>
+              Send ETH
+            </button>
+          </div>
+        </div>
+        <div class="row gap">
+          <button id="btnProposeOwner" class="btn btn-info" disabled>
+            Propose Safe Tx
+          </button>
+          <button id="btnProposeDelegate" class="btn btn-info" disabled>
+            Propose as Delegate
+          </button>
+        </div>
+      </section>
+
+      <section class="card" id="logCard">
+        <h3>Activity</h3>
+        <pre id="log" class="log">Ready.</pre>
+      </section>
+    </main>
+
+    <script type="module" src="/assets/admin.js"></script>
+  </body>
+</html>

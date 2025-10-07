@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Giga Admin</title>
+    <link rel="stylesheet" href="/assets/admin.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">GigaID · Admin</div>
+      <div class="actions">
+        <button id="backBtn" class="btn btn-secondary">Back</button>
+      </div>
+    </header>
+    <main class="container">
+      <div class="card">
+        <h3>Overview</h3>
+        <div class="grid-2">
+          <div>
+            <div class="kv"><span>User</span><span id="gaUser">-</span></div>
+            <div class="kv"><span>Email</span><span id="gaEmail">-</span></div>
+            <div class="kv"><span>DID</span><span id="gaDID">-</span></div>
+            <div class="kv">
+              <span>Role</span><span id="gaRole">Giga Admin</span>
+            </div>
+          </div>
+          <div>
+            <div class="kv">
+              <span>Network</span><span id="gaNetwork">-</span>
+            </div>
+            <div class="kv">
+              <span>Signer EOA</span><span id="gaSigner">-</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="comingSoon">
+        <h3>Admin Tools (coming soon)</h3>
+        <ul>
+          <li>Allowlist management</li>
+          <li>User and permissions</li>
+          <li>Organization status</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Logs</h3>
+        <pre id="gaLog" class="log"></pre>
+      </div>
+    </main>
+    <script>
+      (function () {
+        const log = (m) => {
+          const box = document.querySelector("#gaLog");
+          const t = new Date().toLocaleTimeString();
+          box.textContent += `\n[${t}] ${m}`;
+          box.scrollTop = box.scrollHeight;
+        };
+        const token = localStorage.getItem("giga_token");
+        const userRaw = localStorage.getItem("giga_user");
+        if (!token || !userRaw) {
+          window.location.href = "/admin.html";
+          return;
+        }
+        const u = JSON.parse(userRaw);
+        document.querySelector("#gaUser").textContent = u.username || "-";
+        document.querySelector("#gaEmail").textContent = u.email || "-";
+        document.querySelector("#gaDID").textContent = u.did || "-";
+        document.querySelector("#gaSigner").textContent =
+          u.signerAddress || "-";
+        document.querySelector("#backBtn").addEventListener("click", () => {
+          window.location.href = "/admin.html";
+        });
+        // Fetch basic network/balance info
+        fetch("/api/balance", {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d?.data?.network)
+              document.querySelector("#gaNetwork").textContent = d.data.network;
+            log("Loaded balance/network");
+          })
+          .catch((e) => log(`Balance failed: ${e.message}`));
+      })();
+    </script>
+  </body>
+</html>

@@ -12,6 +12,7 @@ import { corsOptions, rateLimiter } from "../config/middleware.js";
 import { validateRequest } from "../middleware/validation.js";
 import {
   verifyRequestSchema,
+  userRegistrationSchema,
   apiRegistrationSchema,
   credentialIssuanceSchema,
 } from "../validation/schemas.js";
@@ -20,10 +21,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import session from "express-session";
 import { AuthController } from "../controllers/auth.js";
+import { createHierarchyRoutes } from "./hierarchy-routes.js";
 import { createMultisigRoutes } from "./multisig-routes.js";
 import fs from "fs";
 import { VerifierService } from "../services/verifier.js";
+import { HierarchicalCredentialService } from "../services/hierarchical-credential.js";
 import { apiKeyAuthMiddleware } from "../middleware/apiKeyAuth.js";
+import { CredentialType } from "../models/credential-record.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,12 +40,17 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(rateLimiter);
 
-// Session configuration (kept minimal for compatibility with middleware)
+// Session configuration
 app.use(
   session({
     secret: env.SESSION_SECRET || "your-secret-key",
     resave: false,
     saveUninitialized: false,
+    cookie: {
+      secure: env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
   })
 );
 
@@ -113,7 +122,7 @@ function setupRoutes(agent: ConfiguredAgent, dbConnection: DataSource) {
     }
   );
 
-  // Removed legacy WebAuthn-only registration endpoint
+  // Removed legacy WebAuthn registration endpoint
 
   // API registration endpoint for third-party integration
   app.post(
@@ -178,7 +187,10 @@ function setupRoutes(agent: ConfiguredAgent, dbConnection: DataSource) {
   );
   app.get("/api/auth/methods", authController.getAuthMethods);
 
-  // Removed legacy status endpoint
+  // Removed legacy /auth/status endpoint (session-based)
+
+  // Hierarchical credential routes
+  app.use("/api/hierarchy", createHierarchyRoutes(agent, dbConnection));
 
   // Multisig wallet routes
   app.use("/api/multisig", createMultisigRoutes(agent, dbConnection));
@@ -186,43 +198,72 @@ function setupRoutes(agent: ConfiguredAgent, dbConnection: DataSource) {
   // API Key middleware (for all /api/credentials routes)
   app.use("/api/credentials", apiKeyAuthMiddleware(dbConnection));
 
-  // Credential issuance endpoint (generic VC)
+  // Credential issuance endpoint (hybrid auth)
   app.post(
     "/api/credentials/issue",
     validateRequest(credentialIssuanceSchema),
     async (req: Request, res: Response) => {
       try {
-        const sessionUser = req.session.userId
+        // Hybrid auth: session or API key
+        const user = req.session.userId
           ? await userService.getUserById(req.session.userId)
           : null;
         const apiKey = (req as any).apiKey;
-        const { issuerDid, subjectDid, type, context, claims } = req.body;
+        const { issuerDid, subjectDid, type, claims, expiresAt } = req.body;
 
-        // Authorization: session user or API key with issue:* scope
-        const hasIssueScope = apiKey?.scopes?.some((s: string) =>
-          s.startsWith("issue:")
-        );
-        if (!sessionUser && !hasIssueScope) {
+        // Authorization: session user or API key must have permission
+        let canIssue = false;
+        let issuer = null;
+        if (user) {
+          // TODO: Add user role/permission checks here
+          canIssue = true;
+          issuer = user.did;
+        } else if (apiKey) {
+          // Check scopes
+          if (apiKey.scopes.some((s: string) => s.startsWith("issue:"))) {
+            canIssue = true;
+            issuer = issuerDid; // API key must provide issuerDid
+          }
+        }
+        if (!canIssue) {
           return res
             .status(403)
             .json({ error: "Not authorized to issue credentials" });
         }
 
-        const effectiveIssuerDid = sessionUser?.did || issuerDid;
-        if (!effectiveIssuerDid) {
+        // Map type to CredentialType
+        let credentialType: CredentialType | undefined;
+        if (Array.isArray(type)) {
+          // Accept either enum value or class name (e.g., "government_authorization" or "GovernmentAuthorizationCredential")
+          credentialType = Object.values(CredentialType).find(
+            (ct) =>
+              ct === type[type.length - 1] ||
+              type[type.length - 1]
+                .replace("Credential", "")
+                .replace(/([A-Z])/g, "_$1")
+                .toLowerCase()
+                .replace(/^_/, "") === ct
+          ) as CredentialType | undefined;
+        }
+        if (!credentialType) {
           return res
             .status(400)
-            .json({ error: "issuerDid required (or login required)" });
+            .json({ error: "Invalid or missing credential type" });
         }
 
-        const vc = await credentialService.issueCredential({
-          issuerDid: effectiveIssuerDid,
+        // Issue credential using hierarchical service
+        const hierarchicalCredentialService = new HierarchicalCredentialService(
+          agent,
+          dbConnection
+        );
+        const credential = await hierarchicalCredentialService.issueCredential({
+          issuerDid: issuer,
           subjectDid,
-          type,
-          context,
+          credentialType,
           claims,
+          expiresAt: expiresAt ? new Date(expiresAt) : undefined,
         });
-        res.json({ success: true, credential: vc });
+        res.json({ success: true, credential });
       } catch (error) {
         console.error("Credential issuance error:", error);
         res.status(500).json({
@@ -248,29 +289,197 @@ function setupRoutes(agent: ConfiguredAgent, dbConnection: DataSource) {
     }
   });
 
-  // Removed hierarchy-based credential listing endpoints
+  // Credential query and revocation endpoints
+  const hierarchicalCredentialService = new HierarchicalCredentialService(
+    agent,
+    dbConnection
+  );
 
-  // Removed revoke endpoint (hierarchy-specific)
-
-  // Removed role inference endpoint (hierarchy-specific)
-
-  // Removed permissions check endpoint (hierarchy-specific)
-
-  // Serve test page
-  app.get("/test", (req, res) => {
-    const testPagePath = path.join(publicPath, "test.html");
-    console.log("Serving test page from:", testPagePath);
-    console.log("File exists:", fs.existsSync(testPagePath));
-    res.sendFile(testPagePath);
+  // Get credentials issued by a DID
+  app.get("/api/credentials/issued/:did", async (req, res) => {
+    try {
+      const { did } = req.params;
+      const credentials =
+        await hierarchicalCredentialService.getIssuedCredentials(did);
+      res.json({ success: true, data: credentials });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   });
 
-  // Removed hierarchy demo routes
+  // Get credentials received by a DID
+  app.get("/api/credentials/received/:did", async (req, res) => {
+    try {
+      const { did } = req.params;
+      const credentials =
+        await hierarchicalCredentialService.getReceivedCredentials(did);
+      res.json({ success: true, data: credentials });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
 
-  // Removed legacy password-auth test page route
+  // Revoke a credential (issuer or admin)
+  app.post("/api/credentials/revoke", async (req, res) => {
+    try {
+      const { credentialId, reason, revokerDid, adminUserId } = req.body;
+      if (!credentialId || !reason) {
+        return res.status(400).json({
+          success: false,
+          error: "credentialId and reason are required",
+        });
+      }
 
-  // Root route
+      if (revokerDid) {
+        await hierarchicalCredentialService.revokeCredential(
+          credentialId,
+          revokerDid,
+          reason
+        );
+        return res.json({
+          success: true,
+          message: "Credential revoked by issuer",
+        });
+      }
+
+      if (adminUserId) {
+        await hierarchicalCredentialService.revokeCredentialByAdmin(
+          credentialId,
+          adminUserId,
+          reason
+        );
+        return res.json({
+          success: true,
+          message: "Credential revoked by admin",
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: "revokerDid or adminUserId required",
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Get roles for a DID (based on credentials)
+  app.get("/api/role/:did", async (req, res) => {
+    try {
+      const { did } = req.params;
+      const credentials =
+        await hierarchicalCredentialService.getReceivedCredentials(did);
+      const roles = new Set<string>();
+
+      for (const cred of credentials) {
+        try {
+          const data = JSON.parse(cred.credentialData);
+          if (data.type && Array.isArray(data.type)) {
+            for (const t of data.type) {
+              if (t.endsWith("Credential") && t !== "VerifiableCredential") {
+                roles.add(t.replace("Credential", "").toLowerCase());
+              }
+            }
+          }
+        } catch {}
+      }
+
+      res.json({ success: true, roles: Array.from(roles) });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Check permission for a DID to perform an action
+  app.post("/api/permissions/check", async (req, res) => {
+    try {
+      const { did, action } = req.body;
+      if (!did || !action) {
+        return res
+          .status(400)
+          .json({ success: false, error: "did and action are required" });
+      }
+
+      const credentials =
+        await hierarchicalCredentialService.getReceivedCredentials(did);
+      const roles = new Set<string>();
+
+      for (const cred of credentials) {
+        try {
+          const data = JSON.parse(cred.credentialData);
+          if (data.type && Array.isArray(data.type)) {
+            for (const t of data.type) {
+              if (t.endsWith("Credential") && t !== "VerifiableCredential") {
+                roles.add(t.replace("Credential", "").toLowerCase());
+              }
+            }
+          }
+        } catch {}
+      }
+
+      let allowed = false;
+      let reason = "";
+      if (action === "issue:school" && roles.has("government")) {
+        allowed = true;
+      } else if (action === "issue:government" && roles.has("countryoffice")) {
+        allowed = true;
+      } else {
+        reason = `Role(s) [${Array.from(roles).join(
+          ", "
+        )}] not allowed for action ${action}`;
+      }
+
+      res.json({ success: true, allowed, reason });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Removed legacy WebAuthn demo pages (/test, /hierarchy-test)
+
+  // Serve password-based hierarchy test page
+  app.get("/hierarchy-test-password", (req, res) => {
+    const hierarchyTestPath = path.join(
+      publicPath,
+      "hierarchy-test-password.html"
+    );
+    console.log(
+      "Serving password hierarchy test page from:",
+      hierarchyTestPath
+    );
+    console.log("File exists:", fs.existsSync(hierarchyTestPath));
+    res.sendFile(hierarchyTestPath);
+  });
+
+  // Serve password authentication test page
+  app.get("/password-auth-test", (req, res) => {
+    const passwordAuthTestPath = path.join(
+      publicPath,
+      "password-auth-test.html"
+    );
+    console.log("Serving password auth test page from:", passwordAuthTestPath);
+    console.log("File exists:", fs.existsSync(passwordAuthTestPath));
+    res.sendFile(passwordAuthTestPath);
+  });
+
+  // Root route → modern password auth test page
   app.get("/", (req, res) => {
-    res.redirect("/test");
+    res.redirect("/password-auth-test");
   });
 
   // Health check endpoint
@@ -278,7 +487,6 @@ function setupRoutes(agent: ConfiguredAgent, dbConnection: DataSource) {
     res.json({
       status: "ok",
       environment: env.NODE_ENV,
-      network: env.ETH_NETWORK,
       services: {
         veramo: credentialService ? "initialized" : "not initialized",
       },
@@ -292,7 +500,13 @@ interface VerifyRequest extends Request {
   };
 }
 
-// Removed legacy RegisterRequest interface
+interface RegisterRequest extends Request {
+  body: {
+    username: string;
+    email: string;
+    displayName: string;
+  };
+}
 
 // Initialize services before starting server
 initializeServices().catch(console.error);
@@ -301,11 +515,6 @@ initializeServices().catch(console.error);
 const server = app.listen(port, () => {
   console.log(
     `Server running in ${env.NODE_ENV} mode at http://localhost:${port}`
-  );
-  console.log(
-    `Blockchain network: ${env.ETH_NETWORK}${
-      env.RPC_URL ? " (RPC override set)" : ""
-    }`
   );
 });
 

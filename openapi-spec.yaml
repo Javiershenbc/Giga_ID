@@ -4,16 +4,17 @@ info:
   description: |
     # GigaID Decentralized Identity and Credential Management System
 
-    GigaID is a decentralized identity system that combines DIDs (Decentralized Identifiers),
-    Verifiable Credentials, and Ethereum blockchain integration for authentication and
-    wallet operations (including multisig via Safe).
+    GigaID is a decentralized identity system that combines DIDs (Decentralized Identifiers), 
+    Verifiable Credentials, Ethereum blockchain integration, and hierarchical organizational 
+    structures to manage educational credentials and authentication.
 
     ## Key Features
-    - **DIDs**: DID creation and resolution via did:ethr
-    - **Verifiable Credentials**: Issue and verify JWT-based credentials
-    - **Authentication**: Password-based (with optional WebAuthn add-on) using JWT
-    - **Blockchain Integration**: Balance, ETH transfers, Safe multisig flows
-    - **API Key Authentication**: Issue credentials via x-api-key or JWT
+    - **Hierarchical Organizations**: Giga → Country Office → Government → School
+    - **Verifiable Credentials**: Issue, verify, and revoke educational credentials
+    - **Multiple Authentication Methods**: WebAuthn, password-based, and hybrid authentication
+    - **Blockchain Integration**: Ethereum wallet management and transactions
+    - **API Key Authentication**: Third-party integration support
+    - **JWT-based Sessions**: Secure token-based authentication
 
         ## Authentication
 
@@ -39,10 +40,12 @@ servers:
 tags:
   - name: Authentication
     description: User registration, login, and token management
+  - name: Organizations
+    description: Hierarchical organization management (Giga/Country Office/Government/School)
   - name: Credentials
-    description: Issue and verify verifiable credentials (generic)
-  - name: Multisig
-    description: Multisig wallet registration, association, and utilities
+    description: Issue, verify, and manage verifiable credentials
+  - name: Users
+    description: User management and permissions
   - name: Blockchain
     description: Ethereum wallet and transaction management
   - name: System
@@ -55,11 +58,6 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: JWT token obtained from login endpoints
-    apiKeyHeader:
-      type: apiKey
-      in: header
-      name: x-api-key
-      description: API key for credential issuance without user session
 
   schemas:
     # Authentication Schemas
@@ -154,6 +152,14 @@ components:
           type: string
           enum: [webauthn, password, hybrid]
           example: "password"
+        organizationId:
+          type: string
+          format: uuid
+          nullable: true
+        organizationRole:
+          type: string
+          enum: [admin, staff, member]
+          nullable: true
 
 # Security applied to all endpoints by default (JWT Bearer Token)
 security:
@@ -165,20 +171,13 @@ paths:
     post:
       tags: [Authentication]
       summary: Register a new user
-      description: Register a new user with password authentication and optionally link a multisig wallet
+      description: Register a new user with password authentication and receive JWT tokens
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - $ref: "#/components/schemas/UserRegistration"
-                - type: object
-                  properties:
-                    multisigWalletAddress:
-                      type: string
-                      description: Optional Safe address to associate at registration
-                      example: "0x1234567890abcdef1234567890abcdef12345678"
+              $ref: "#/components/schemas/UserRegistration"
       responses:
         "201":
           description: User registered successfully
@@ -223,54 +222,243 @@ paths:
         "200":
           description: Token refreshed successfully
 
-  # Removed organization endpoints
-
-  # Credentials (Generic)
-  /api/credentials/issue:
+  # Organization Management Endpoints
+  /api/hierarchy/organizations:
     post:
-      tags: [Credentials]
-      summary: Issue a generic verifiable credential (JWT)
-      description: Issue a Verifiable Credential JWT from issuer DID to subject DID
+      tags: [Organizations]
+      summary: Create new organization
+      description: Create a new organization in the hierarchy
       security:
         - bearerAuth: []
-        - apiKeyHeader: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [issuerDid, subjectDid, type, context, claims]
+              required: [name, type, description, country, region, contactEmail]
+              properties:
+                name:
+                  type: string
+                  example: "Ministry of Education Kenya"
+                type:
+                  type: string
+                  enum: [giga, country_office, government, school]
+                  example: "government"
+                description:
+                  type: string
+                  example: "Government of Kenya Ministry of Education"
+                country:
+                  type: string
+                  example: "Kenya"
+                region:
+                  type: string
+                  example: "Nairobi"
+                contactEmail:
+                  type: string
+                  format: email
+                  example: "education@gov.ke"
+                parentId:
+                  type: string
+                  format: uuid
+                  description: "Required for non-Giga organizations"
+      responses:
+        "201":
+          description: Organization created successfully
+        "400":
+          description: Validation error
+        "403":
+          description: Insufficient permissions
+
+  /api/hierarchy/organizations/with-users:
+    get:
+      tags: [Organizations]
+      summary: Get organizations with their users
+      description: Retrieve all organizations that the current user can access, along with their associated users
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Organizations retrieved successfully
+
+  /api/hierarchy/organizations/{id}:
+    get:
+      tags: [Organizations]
+      summary: Get organization by ID
+      description: Retrieve a specific organization by its ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Organization retrieved successfully
+        "404":
+          description: Organization not found
+
+  /api/hierarchy/organizations/type/{type}:
+    get:
+      tags: [Organizations]
+      summary: Get organizations by type
+      description: Retrieve all organizations of a specific type
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [giga, country_office, government, school]
+      responses:
+        "200":
+          description: Organizations retrieved successfully
+
+  /api/hierarchy/hierarchy:
+    get:
+      tags: [Organizations]
+      summary: Get complete organization hierarchy
+      description: Retrieve the complete organizational hierarchy starting from Giga root
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Hierarchy retrieved successfully
+
+  /api/hierarchy/organizations/{organizationId}/associate-user:
+    post:
+      tags: [Organizations]
+      summary: Associate user with organization
+      description: Associate an existing user with an organization and assign a role
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organizationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, role]
+              properties:
+                username:
+                  type: string
+                  example: "john_doe"
+                role:
+                  type: string
+                  enum: [admin, staff, member]
+                  example: "admin"
+      responses:
+        "200":
+          description: User associated successfully
+
+  # Credential Management Endpoints
+  /api/hierarchy/credentials/issue:
+    post:
+      tags: [Credentials]
+      summary: Issue a verifiable credential
+      description: Issue a verifiable credential between organizations in the hierarchy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issuerDid, subjectDid, credentialType, claims]
               properties:
                 issuerDid:
                   type: string
-                  example: "did:ethr:0xIssuer"
+                  example: "did:ethr:0x..."
                 subjectDid:
                   type: string
-                  example: "did:ethr:0xSubject"
-                type:
-                  type: array
-                  items:
-                    type: string
-                  example: ["VerifiableCredential", "ExampleCredential"]
-                context:
-                  type: array
-                  items:
-                    type: string
-                  example:
+                  example: "did:ethr:0x..."
+                credentialType:
+                  type: string
+                  enum:
                     [
-                      "https://www.w3.org/2018/credentials/v1",
-                      "https://schema.org",
+                      country_office_authorization,
+                      government_authorization,
+                      school_authorization,
+                      student_enrollment,
+                      information_worker,
+                      attendance_certificate,
+                      graduation_diploma,
                     ]
+                  example: "government_authorization"
                 claims:
                   type: object
                   additionalProperties: true
-                  example: { name: "Alice" }
+                  example:
+                    authorizedRegions: ["Kenya"]
+                    validFrom: "2025-06-26T13:22:08Z"
+                    authorityLevel: "National"
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: "Optional expiration date"
       responses:
-        "200":
+        "201":
           description: Credential issued successfully
 
-  /api/credentials/verify:
+  /api/hierarchy/credentials/issue-student:
+    post:
+      tags: [Credentials]
+      summary: Issue student credential by username
+      description: Issue a student-specific credential using the student's username
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issuerDid, studentUsername, credentialType, claims]
+              properties:
+                issuerDid:
+                  type: string
+                  example: "did:ethr:0x..."
+                studentUsername:
+                  type: string
+                  example: "student_john"
+                credentialType:
+                  type: string
+                  enum:
+                    [
+                      student_enrollment,
+                      information_worker,
+                      attendance_certificate,
+                      graduation_diploma,
+                    ]
+                  example: "student_enrollment"
+                claims:
+                  type: object
+                  additionalProperties: true
+                  example:
+                    schoolName: "Nairobi Primary School"
+                    grade: "Grade 5"
+                    enrollmentDate: "2025-01-15"
+                expiresAt:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Student credential issued successfully
+
+  /api/hierarchy/credentials/verify:
     post:
       tags: [Credentials]
       summary: Verify a credential
@@ -292,7 +480,41 @@ paths:
         "200":
           description: Credential verification result
 
-  # Removed issued/received endpoints (hierarchy-specific)
+  /api/hierarchy/credentials/issued/{did}:
+    get:
+      tags: [Credentials]
+      summary: Get credentials issued by DID
+      description: Retrieve all credentials issued by a specific DID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: did
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "did:ethr:0x..."
+      responses:
+        "200":
+          description: Issued credentials retrieved successfully
+
+  /api/hierarchy/credentials/received/{did}:
+    get:
+      tags: [Credentials]
+      summary: Get credentials received by DID
+      description: Retrieve all credentials received by a specific DID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: did
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "did:ethr:0x..."
+      responses:
+        "200":
+          description: Received credentials retrieved successfully
 
   # User Management Endpoints
   /api/hierarchy/users/available:
@@ -368,7 +590,7 @@ paths:
     get:
       tags: [Blockchain]
       summary: Get user's ETH balance
-      description: Retrieve the current Ethereum balance and address for the authenticated user
+      description: Retrieve the current Ethereum balance for the authenticated user
       security:
         - bearerAuth: []
       responses:
@@ -379,7 +601,7 @@ paths:
     post:
       tags: [Blockchain]
       summary: Send Ethereum transaction
-      description: Send an Ethereum transaction from the user's wallet (EOA or multisig signer)
+      description: Send an Ethereum transaction from the user's wallet
       security:
         - bearerAuth: []
       requestBody:
@@ -404,14 +626,6 @@ paths:
                 gasPrice:
                   type: string
                   example: "20000000000"
-                overrideSignerPrivateKey:
-                  type: string
-                  description: Optional 64-hex private key to override signer for this call
-                  example: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                useServerSecretAsSigner:
-                  type: boolean
-                  description: If true, uses SECRET_KEY from server env as signer
-                  example: false
       responses:
         "200":
           description: Transaction sent successfully
@@ -434,92 +648,17 @@ paths:
         "200":
           description: Transaction status retrieved successfully
 
-  /api/propose-transaction:
-    post:
-      tags: [Blockchain]
-      summary: Propose Safe transaction (owner)
-      description: Propose a transaction to the linked Safe (requires owner context)
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [to, amount]
-              properties:
-                to:
-                  type: string
-                  example: "0x742d35Cc6635C0532925a3b8D400900f"
-                amount:
-                  type: string
-                  example: "0.01"
-                gasLimit:
-                  type: string
-                  example: "21000"
-                gasPrice:
-                  type: string
-                  example: "20000000000"
-                overrideSignerPrivateKey:
-                  type: string
-                  description: Optional 64-hex private key to override signer for this call
-                useServerSecretAsSigner:
-                  type: boolean
-                  example: false
-      responses:
-        "200":
-          description: Safe transaction proposed
-
-  /api/propose-transaction-delegate:
-    post:
-      tags: [Blockchain]
-      summary: Propose Safe transaction (delegate)
-      description: Propose a transaction to the linked Safe as delegate (not owner)
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [to, amount]
-              properties:
-                to:
-                  type: string
-                  example: "0x742d35Cc6635C0532925a3b8D400900f"
-                amount:
-                  type: string
-                  example: "0.01"
-                gasLimit:
-                  type: string
-                  example: "21000"
-                gasPrice:
-                  type: string
-                  example: "20000000000"
-                overrideSignerPrivateKey:
-                  type: string
-                useServerSecretAsSigner:
-                  type: boolean
-                  example: false
-      responses:
-        "200":
-          description: Safe transaction proposed as delegate
-
-  /api/multisig/transactions/pending:
-    get:
-      tags: [Multisig]
-      summary: List pending multisig transactions
-      description: Pending Safe transactions for the user's linked wallet
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Pending transactions listed
-
   # System Information Endpoints
-  # Removed hierarchy system summary
+  /api/hierarchy/summary:
+    get:
+      tags: [System]
+      summary: Get system summary
+      description: Retrieve summary statistics of organizations, users, and credentials
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: System summary retrieved successfully
 
   /api/did-preview:
     post:

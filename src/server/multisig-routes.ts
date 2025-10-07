@@ -24,10 +24,19 @@ const createMultisigWalletSchema = z.object({
   }),
 });
 
+const hex64 = /^[a-fA-F0-9]{64}$/;
+const maybePrefixedPk = z
+  .string()
+  .transform((v) => (v && !v.startsWith("0x") ? `0x${v}` : v))
+  .refine((v) => !v || /^0x[a-fA-F0-9]{64}$/.test(v), {
+    message: "Invalid Ethereum private key format",
+  })
+  .optional();
+
 const associateWithMultisigSchema = z.object({
   body: z.object({
     multisigWalletAddress: ethereumAddressSchema,
-    signerPrivateKey: ethereumPrivateKeySchema.optional(),
+    signerPrivateKey: maybePrefixedPk,
     generateSigner: z.boolean().optional(),
   }),
 });

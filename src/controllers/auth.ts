@@ -7,9 +7,11 @@ import {
 } from "../services/transaction.js";
 import { JWTService } from "../services/jwt.js";
 import { AuthMethod } from "../models/user.js";
+import { AuthorizationService } from "../services/authorization.js";
 import { z } from "zod";
 import session from "express-session";
-// Removed hierarchy imports
+import { OrganizationType } from "../models/organization.js";
+import { CredentialType } from "../models/credential-record.js";
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import { logger } from "../utils/logger.js";
 import { env } from "../config/env.js";
@@ -695,7 +697,63 @@ export class AuthController {
         });
       }
 
-      // Removed hierarchy-based permission checks; rely on authentication only
+      // --- PERMISSION CHECK ---
+      // Load user with organization
+      const user = await this.userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
+      // Check if user is admin of Giga, Country Office, Government, or School org
+      const isAdmin =
+        user.organizationRole === "admin" &&
+        user.organization &&
+        [
+          OrganizationType.GIGA,
+          OrganizationType.COUNTRY_OFFICE,
+          OrganizationType.GOVERNMENT,
+          OrganizationType.SCHOOL,
+        ].includes(user.organization.type);
+
+      // Check if user is staff of Country Office
+      const isCountryOfficeStaff =
+        user.organizationRole === "staff" &&
+        user.organization &&
+        user.organization.type === OrganizationType.COUNTRY_OFFICE;
+
+      // Check if user has Information Worker credential
+      let isInformationWorker = false;
+      if (user.hierarchicalCredentials) {
+        try {
+          const credIds = JSON.parse(user.hierarchicalCredentials);
+          if (Array.isArray(credIds) && credIds.length > 0) {
+            // Query credential records for these IDs and check type
+            const dataSource =
+              this.userService["userRepository"].manager.connection;
+            const credRepo = dataSource.getRepository("CredentialRecord");
+            const infoWorkerCred = await credRepo.findOne({
+              where: {
+                id: credIds,
+                type: CredentialType.INFORMATION_WORKER,
+                status: "active",
+              },
+            });
+            if (infoWorkerCred) isInformationWorker = true;
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+
+      if (!isAdmin && !isCountryOfficeStaff && !isInformationWorker) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message:
+            "You must be an admin of a Giga, Country Office, Government, or School org, staff of a Country Office, or have an Information Worker credential to send ETH.",
+        });
+      }
+      // --- END PERMISSION CHECK ---
 
       // Validate request body
       const validationResult = sendTransactionSchema.safeParse(req.body);
@@ -1200,6 +1258,7 @@ export class AuthController {
           displayName: user.displayName,
           did: user.did,
           authMethod: user.authMethod,
+          signerAddress: (user as any).signerAddress,
         },
         auth: {
           token,

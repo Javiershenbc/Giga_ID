@@ -6,7 +6,6 @@ import { logger } from "../utils/logger.js";
 import { MultisigWalletService } from "./multisig-wallet.js";
 import { env } from "../config/env.js";
 import { MultisigWallet } from "../models/multisig-wallet.js";
-import { secretManager } from "./secret-manager.js";
 
 export class KeyManagerService {
   private agent: ConfiguredAgent;
@@ -61,15 +60,8 @@ export class KeyManagerService {
    * Get ethers.js Wallet signer for the user's EOA (multisig users only)
    */
   async getEOASigner(userId: string): Promise<ethers.Wallet | null> {
-    const user: User | null = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-    if (
-      !user ||
-      !user.isMultisigEnabled ||
-      !user.signerPrivateKey ||
-      !this.multisigService
-    ) {
+    const user: User | null = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || !user.isMultisigEnabled || !user.signerPrivateKey || !this.multisigService) {
       return null;
     }
     const privateKey = await this.multisigService.decryptSignerPrivateKey(
@@ -380,18 +372,22 @@ export class KeyManagerService {
   }
 
   /**
-   * Generate a secure private key using SecretManager
-   * Security: Replaced insecure deterministic generation with cryptographically secure random generation
+   * Temporary private key generation (fallback)
    */
-  private generateSecurePrivateKey(): string {
-    logger.info(
-      "Generating cryptographically secure private key using SecretManager"
+  private generateTemporaryPrivateKey(did: string): string {
+    logger.warn(
+      "🚨 WARNING: Using temporary key derivation - NOT SECURE FOR PRODUCTION"
     );
 
-    // Use SecretManager to generate a cryptographically secure private key
-    const privateKey = secretManager.generatePrivateKey();
+    // Create a deterministic private key based on user DID and system secret
+    const seed = `${did}-${process.env.SECRET_KEY || "default-secret"}`;
+    const hash = ethers.keccak256(ethers.toUtf8Bytes(seed));
 
-    logger.blockchain("Generated secure random private key");
+    // Ensure the hash is a valid private key (within secp256k1 curve order)
+    const privateKey = hash.startsWith("0x") ? hash : `0x${hash}`;
+
+    logger.blockchain(`Generated temporary deterministic private key`);
+
     return privateKey;
   }
 
@@ -411,9 +407,9 @@ export class KeyManagerService {
         `Creating matching private key for user ${user.username} - this should only happen during development/testing`
       );
 
-      // Generate a new secure private key using SecretManager
-      const privateKey = this.generateSecurePrivateKey();
-      const wallet = new ethers.Wallet(privateKey);
+      // Generate a new random private key
+      const wallet = ethers.Wallet.createRandom();
+      const privateKey = wallet.privateKey;
       const newAddress = wallet.address;
 
       logger.blockchain(`Generated new key with address: ${newAddress}`);

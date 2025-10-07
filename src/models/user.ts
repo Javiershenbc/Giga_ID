@@ -4,15 +4,22 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from "typeorm";
+import { Organization } from "./organization.js";
 // Import only the type reference to avoid circular dependency
 // The actual relationship will be established via foreign key
 
-// Removed hierarchy roles
+export enum UserRole {
+  ADMIN = "admin",
+  STAFF = "staff",
+  MEMBER = "member",
+  STUDENT = "student",
+}
 
 export enum AuthMethod {
   PASSWORD = "password",
-  // WEBAUTHN = "webauthn",     // Commented out for future use
   // HYBRID = "hybrid"          // Commented out for future use
 }
 
@@ -64,7 +71,24 @@ export class User {
   @Column({ default: false })
   hasBackup!: boolean;
 
-  // Removed hierarchy association fields
+  // Organization association
+  @Column({ nullable: true })
+  organizationId?: string;
+
+  @ManyToOne(() => Organization, { nullable: true })
+  @JoinColumn({ name: "organizationId" })
+  organization?: Organization;
+
+  @Column({
+    type: "varchar",
+    enum: UserRole,
+    nullable: true,
+  })
+  organizationRole?: UserRole;
+
+  // Hierarchical credentials received by this user
+  @Column("text", { nullable: true })
+  hierarchicalCredentials?: string; // JSON array of credential IDs
 
   // Multisig wallet association
   @Column({ nullable: true })

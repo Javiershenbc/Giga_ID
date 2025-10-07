@@ -11,7 +11,6 @@ import { User } from "../models/user.js";
 import { ConfiguredAgent } from "../agent/setup.js";
 import { logger } from "../utils/logger.js";
 import { env } from "../config/env.js";
-import { secretManager } from "./secret-manager.js";
 
 // Re-export types for use by other modules
 export {
@@ -150,38 +149,51 @@ export class MultisigWalletService {
         throw new Error("Multisig wallet not found");
       }
 
-      // Generate or validate signer key
-      let signerKeyPair: SignerKeyPair;
+      // Decide signer behavior: provide, generate, reuse existing, or none
+      let newEncryptedSignerKey: string | undefined;
+      let newSignerAddress: string | undefined;
+      let willUpdateSigner = false;
 
       if (params.signerPrivateKey) {
         // Use provided signer key
-        signerKeyPair = this.validateSignerKey(params.signerPrivateKey);
+        const signerKeyPair = this.validateSignerKey(params.signerPrivateKey);
+        newEncryptedSignerKey = await this.encryptSignerPrivateKey(
+          signerKeyPair.privateKey
+        );
+        newSignerAddress = signerKeyPair.address;
+        willUpdateSigner = true;
       } else if (params.generateSigner) {
         // Generate new signer key
-        signerKeyPair = this.generateSignerKeyPair();
-      } else {
-        throw new Error(
-          "Must provide either signerPrivateKey or set generateSigner to true"
+        const signerKeyPair = this.generateSignerKeyPair();
+        newEncryptedSignerKey = await this.encryptSignerPrivateKey(
+          signerKeyPair.privateKey
         );
+        newSignerAddress = signerKeyPair.address;
+        willUpdateSigner = true;
+      } else if (user.signerPrivateKey && user.signerAddress) {
+        // Reuse existing signer (no changes needed)
+        willUpdateSigner = false;
+      } else {
+        // No signer provided/requested and none stored -> proceed without signer
+        willUpdateSigner = false;
       }
 
-      // Encrypt the signer private key
-      const encryptedSignerKey = await this.encryptSignerPrivateKey(
-        signerKeyPair.privateKey
-      );
-
-      // Update user with multisig association
+      // Update user with multisig association (and signer only if changed)
       user.multisigWalletId = wallet.id;
-      user.signerPrivateKey = encryptedSignerKey;
-      user.signerAddress = signerKeyPair.address;
       user.isMultisigEnabled = true;
+      if (willUpdateSigner) {
+        user.signerPrivateKey = newEncryptedSignerKey;
+        user.signerAddress = newSignerAddress;
+      }
 
       const updatedUser = await this.userRepository.save(user);
 
       logger.info(
         `Associated user ${user.username} with multisig wallet ${wallet.address}`
       );
-      logger.info(`Generated signer address: ${signerKeyPair.address}`);
+      if (willUpdateSigner && newSignerAddress) {
+        logger.info(`Using signer address: ${newSignerAddress}`);
+      }
 
       return updatedUser;
     } catch (error) {
@@ -360,81 +372,57 @@ export class MultisigWalletService {
   }
 
   /**
-   * Encrypt signer private key for storage using SecretManager
-   * Security: Replaced insecure fallback with SecretManager
+   * Encrypt signer private key for storage
    */
   private async encryptSignerPrivateKey(privateKey: string): Promise<string> {
-    try {
-      // Generate a unique identifier for this signer key
-      const identifier = `signer-key-${Date.now()}-${Math.random()
-        .toString(36)
-        .substring(2)}`;
+    const crypto = await import("crypto");
+    const secretKey = env.SECRET_KEY || "default-secret";
 
-      // Use SecretManager for secure encryption
-      const encryptedKey = await secretManager.storePrivateKey(
-        identifier,
-        privateKey
-      );
+    // AES-256-GCM with random IV and auth tag
+    const algorithm = "aes-256-gcm";
+    const key = crypto.scryptSync(secretKey, "salt", 32);
+    const iv = crypto.randomBytes(12); // 96-bit IV recommended for GCM
+    const cipher = crypto.createCipheriv(algorithm, key, iv);
 
-      // Store the identifier with the encrypted data so we can retrieve it later
-      return `${identifier}:${encryptedKey}`;
-    } catch (error) {
-      logger.error("Failed to encrypt signer private key:", error);
-      throw new Error("Private key encryption failed");
-    }
+    const encrypted = Buffer.concat([
+      cipher.update(Buffer.from(privateKey, "utf8")),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
+
+    // Return iv:tag:ciphertext as hex
+    return [
+      iv.toString("hex"),
+      authTag.toString("hex"),
+      encrypted.toString("hex"),
+    ].join(":");
   }
 
   /**
-   * Decrypt signer private key using SecretManager
-   * Security: Replaced insecure fallback with SecretManager
+   * Decrypt signer private key
    */
   async decryptSignerPrivateKey(encryptedKey: string): Promise<string> {
     try {
-      // Check if this is the new format (identifier:encryptedData)
-      if (encryptedKey.includes(":") && encryptedKey.split(":").length >= 4) {
-        // New format: identifier:iv:authTag:ciphertext
-        const parts = encryptedKey.split(":");
-        const identifier = parts[0];
-        const encryptedData = parts.slice(1).join(":");
+      const crypto = await import("crypto");
+      const secretKey = env.SECRET_KEY || "default-secret";
 
-        // Use SecretManager for secure decryption
-        return await secretManager.retrievePrivateKey(
-          identifier,
-          encryptedData
-        );
-      } else {
-        // Legacy format - handle old encryption method for backward compatibility
-        logger.warn(
-          "Using legacy decryption method - consider migrating to SecretManager"
-        );
+      const [ivHex, tagHex, encHex] = encryptedKey.split(":");
+      const iv = Buffer.from(ivHex, "hex");
+      const authTag = Buffer.from(tagHex, "hex");
+      const ciphertext = Buffer.from(encHex, "hex");
+      const key = crypto.scryptSync(secretKey, "salt", 32);
 
-        const crypto = await import("crypto");
+      const algorithm = "aes-256-gcm";
+      const decipher = crypto.createDecipheriv(algorithm, key, iv);
+      decipher.setAuthTag(authTag);
 
-        // Parse the encrypted data (legacy format: iv:authTag:ciphertext)
-        const [ivHex, tagHex, encHex] = encryptedKey.split(":");
-        if (!ivHex || !tagHex || !encHex) {
-          throw new Error("Invalid encrypted key format");
-        }
-
-        const iv = Buffer.from(ivHex, "hex");
-        const authTag = Buffer.from(tagHex, "hex");
-        const ciphertext = Buffer.from(encHex, "hex");
-
-        // Use SECRET_KEY directly (no fallback for security)
-        const key = crypto.scryptSync(env.SECRET_KEY, "salt", 32);
-        const algorithm = "aes-256-gcm";
-        const decipher = crypto.createDecipheriv(algorithm, key, iv);
-        decipher.setAuthTag(authTag);
-
-        const decrypted = Buffer.concat([
-          decipher.update(ciphertext),
-          decipher.final(),
-        ]);
-        return decrypted.toString("utf8");
-      }
+      const decrypted = Buffer.concat([
+        decipher.update(ciphertext),
+        decipher.final(),
+      ]);
+      return decrypted.toString("utf8");
     } catch (error) {
-      logger.error("Failed to decrypt signer private key:", error);
-      throw new Error("Private key decryption failed");
+      throw new Error("Failed to decrypt signer private key");
     }
   }
 

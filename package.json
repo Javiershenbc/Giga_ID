@@ -1,7 +1,7 @@
 {
   "name": "gigaid",
   "version": "1.0.0",
-  "description": "DID management and verification system using Veramo",
+  "description": "DID management and credentials verification system",
   "main": "dist/server/app.js",
   "type": "module",
   "engines": {
@@ -14,18 +14,11 @@
     "dev": "nodemon",
     "build": "tsc && npm run copy-public",
     "copy-public": "cp -r src/public dist/",
-    "test": "npm run build && concurrently \"npm run start\" \"wait-on http://localhost:3000/health && NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-api.ts\"",
-    "test:api": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-api.ts",
-    "test:flow": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-flow.ts",
-    "test:registration-api": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-api-registration.ts",
-    "test:eth": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-eth-transfer.ts",
-    "test:hierarchy": "echo 'Removed'",
-    "test:school-flow": "echo 'Removed'",
-    "get-org-info": "echo 'Removed'",
-    "reset-db": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/reset-database.ts",
-    "seed-db": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/seed-database.ts",
-    "setup": "node scripts/setup-public.js",
-    "postinstall": "npm run setup"
+    "test": "npm run build && concurrently \"npm run start\" \"wait-on http://localhost:3000/health && NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-app.ts\"",
+    "test:e2e": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/test-app.ts",
+    "get-org-info": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/get-organization-info.ts",
+    "reset-db": "node --loader ts-node/esm --experimental-specifier-resolution=node src/scripts/reset-database.ts",
+    "seed-db": "NODE_OPTIONS='--loader ts-node/esm' ts-node src/scripts/seed-database.ts"
   },
   "keywords": [
     "DID",
@@ -36,7 +29,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@simplewebauthn/browser": "^13.1.0",
     "@simplewebauthn/server": "^8.3.6",
     "@simplewebauthn/types": "^12.0.0",
     "@types/bcryptjs": "^3.0.0",
@@ -49,7 +41,6 @@
     "@veramo/did-provider-ethr": "^5.5.3",
     "@veramo/did-resolver": "^5.5.3",
     "@veramo/key-manager": "^5.5.3",
-    "@veramo/kms-local": "^5.5.3",
     "axios": "^1.6.7",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",

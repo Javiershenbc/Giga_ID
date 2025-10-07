@@ -12,13 +12,13 @@ export const env = cleanEnv(process.env, {
     default: "development",
   }),
 
-  // Security - Enhanced validation for SecretManager
+  // Security
   SECRET_KEY: str({
-    desc: "Master secret key for encryption (minimum 32 characters)",
+    desc: "Secret key for encryption",
     default:
       process.env.NODE_ENV === "production"
         ? undefined // Force explicit setting in production
-        : "dev-secret-key-change-in-production-min-32-chars",
+        : "dev-secret-key-change-in-production",
   }),
   SESSION_SECRET: str({
     default:
@@ -38,7 +38,7 @@ export const env = cleanEnv(process.env, {
   }),
   ETH_NETWORK: str({
     choices: ["mainnet", "goerli", "sepolia", "base", "base-sepolia"],
-    default: "sepolia",
+    default: "base-sepolia",
   }),
   // Optional explicit RPC URL override (required for Base networks)
   RPC_URL: str({ default: "" }),

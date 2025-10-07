@@ -65,15 +65,6 @@ export const userRegistrationSchema = z.object({
   }),
 });
 
-// WebAuthn registration schema (with email)
-export const webAuthnRegistrationSchema = z.object({
-  body: z.object({
-    username: usernameSchema,
-    email: emailSchema,
-    displayName: displayNameSchema,
-  }),
-});
-
 // API registration schema (for third-party integration)
 export const apiRegistrationSchema = z.object({
   body: z.object({

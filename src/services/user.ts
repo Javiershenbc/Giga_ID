@@ -178,9 +178,9 @@ export class UserService {
 
       logger.info(`Created credential: ${JSON.stringify(credential)}`);
 
-      // Encrypt the credential using SecretManager
+      // Encrypt the credential
       const encryptedCredential =
-        await this.credentialStorage.encryptCredential(credential);
+        this.credentialStorage.encryptCredential(credential);
       logger.info(
         `Encrypted credential of length: ${encryptedCredential.length}`
       );
@@ -254,6 +254,8 @@ export class UserService {
           "authMethod",
           "passwordHash",
           "credentials",
+          "organizationId",
+          "organizationRole",
           "multisigWalletId",
           "signerAddress",
           "isMultisigEnabled",
@@ -317,9 +319,9 @@ export class UserService {
         throw new Error("User not found");
       }
 
-      // Encrypt the credential using SecretManager
+      // Encrypt the credential
       const encryptedCredential =
-        await this.credentialStorage.encryptCredential(credential);
+        this.credentialStorage.encryptCredential(credential);
 
       // Parse existing credentials or initialize as empty array
       let credentialsArray: string[] = [];
@@ -407,9 +409,8 @@ export class UserService {
           logger.info(
             `Decrypting credential of length ${encryptedCred.length}`
           );
-          const decrypted = await this.credentialStorage.decryptCredential(
-            encryptedCred
-          );
+          const decrypted =
+            this.credentialStorage.decryptCredential(encryptedCred);
           logger.info(
             `Successfully decrypted credential with ID: ${decrypted.id}`
           );
@@ -449,6 +450,7 @@ export class UserService {
     try {
       return await this.userRepository.findOne({
         where: { id },
+        relations: ["organization"],
         select: [
           "id",
           "username",
@@ -456,6 +458,8 @@ export class UserService {
           "displayName",
           "did",
           "authMethod",
+          "organizationId",
+          "organizationRole",
           "multisigWalletId",
           "signerAddress",
           "isMultisigEnabled",

@@ -13,32 +13,22 @@ export interface JWTPayload {
 export class JWTService {
   private static readonly SECRET = env.JWT_SECRET;
   private static readonly EXPIRES_IN = "24h"; // Token expires in 24 hours
-  private static readonly ALGORITHM = "HS256"; // Secure HMAC SHA-256 algorithm
 
   /**
    * Generate a JWT token for a user
-   * Uses HMAC SHA-256 for secure signing
    */
   static generateToken(payload: Omit<JWTPayload, "iat" | "exp">): string {
     return jwt.sign(payload, this.SECRET, {
       expiresIn: this.EXPIRES_IN,
-      algorithm: this.ALGORITHM,
-      issuer: "giga-id", // Add issuer claim for additional security
-      audience: "giga-id-users", // Add audience claim
     });
   }
 
   /**
    * Verify and decode a JWT token
-   * Validates algorithm, issuer, and audience for additional security
    */
   static verifyToken(token: string): JWTPayload {
     try {
-      return jwt.verify(token, this.SECRET, {
-        algorithms: [this.ALGORITHM], // Only allow secure algorithm
-        issuer: "giga-id", // Verify issuer
-        audience: "giga-id-users", // Verify audience
-      }) as JWTPayload;
+      return jwt.verify(token, this.SECRET) as JWTPayload;
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
         throw new Error("Token has expired");
@@ -66,16 +56,12 @@ export class JWTService {
 
   /**
    * Generate a refresh token (longer expiry)
-   * Uses same security parameters as access token
    */
   static generateRefreshToken(
     payload: Omit<JWTPayload, "iat" | "exp">
   ): string {
     return jwt.sign(payload, this.SECRET, {
       expiresIn: "7d", // Refresh token expires in 7 days
-      algorithm: this.ALGORITHM,
-      issuer: "giga-id",
-      audience: "giga-id-users",
     });
   }
 }

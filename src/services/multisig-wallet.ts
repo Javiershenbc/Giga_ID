@@ -8,7 +8,7 @@ import {
   MultisigTransactionType,
 } from "../models/multisig-wallet.js";
 import { User } from "../models/user.js";
-import { ConfiguredAgent } from "../agent/setup.js";
+// Veramo agent removed in Azure migration
 import { logger } from "../utils/logger.js";
 import { env } from "../config/env.js";
 
@@ -51,11 +51,11 @@ export class MultisigWalletService {
   private multisigRepository: Repository<MultisigWallet>;
   private transactionRepository: Repository<MultisigTransaction>;
   private userRepository: Repository<User>;
-  private agent: ConfiguredAgent;
+  private agent: any;
   private provider: ethers.JsonRpcProvider;
   private dataSource: DataSource;
 
-  constructor(agent: ConfiguredAgent, dataSource: DataSource) {
+  constructor(agent: any, dataSource: DataSource) {
     this.agent = agent;
     this.dataSource = dataSource;
     this.multisigRepository = dataSource.getRepository(MultisigWallet);
@@ -218,9 +218,7 @@ export class MultisigWalletService {
         throw new Error("User not found");
       }
 
-      if (!user.did) {
-        throw new Error("User has no DID");
-      }
+      // DID no longer required
 
       if (!user.isMultisigEnabled) {
         throw new Error("User is not configured for multisig");
@@ -228,9 +226,9 @@ export class MultisigWalletService {
 
       // Create a multisig transaction to update DID controller
       const transactionData = {
-        didToUpdate: user.did,
+        didToUpdate: null,
         newController: multisigAddress,
-        previousController: await this.getCurrentDIDController(user.did),
+        previousController: null,
         timestamp: Date.now(),
       };
 
@@ -242,7 +240,7 @@ export class MultisigWalletService {
       });
 
       logger.info(
-        `Created DID controller update transaction for ${user.did} -> ${multisigAddress}`
+        `Created multisig controller update transaction -> ${multisigAddress}`
       );
     } catch (error) {
       logger.error("Error updating DID controller:", error);
@@ -429,23 +427,9 @@ export class MultisigWalletService {
   /**
    * Get current DID controller
    */
-  private async getCurrentDIDController(did: string): Promise<string> {
-    try {
-      const didDoc = await this.agent.resolveDid({ didUrl: did });
-
-      // Extract controller from DID document
-      if (didDoc.didDocument?.controller) {
-        return Array.isArray(didDoc.didDocument.controller)
-          ? didDoc.didDocument.controller[0]
-          : didDoc.didDocument.controller;
-      }
-
-      // Fallback: extract from DID itself
-      return did.replace("did:ethr:", "");
-    } catch (error) {
-      logger.error("Error getting DID controller:", error);
-      throw new Error("Failed to resolve DID controller");
-    }
+  // DID controller lookup removed in Azure migration
+  private async getCurrentDIDController(_did: string): Promise<string | null> {
+    return null;
   }
 
   /**

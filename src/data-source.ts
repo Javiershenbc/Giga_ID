@@ -1,7 +1,6 @@
 import { DataSource } from "typeorm";
 import { User } from "./models/user.js";
 import { Organization } from "./models/organization.js";
-import { CredentialRecord } from "./models/credential-record.js";
 import {
   MultisigWallet,
   MultisigTransaction,
@@ -13,13 +12,7 @@ export const AppDataSource = new DataSource({
   database: env.DB_NAME || "database.sqlite",
   synchronize: env.NODE_ENV !== "production",
   logging: env.NODE_ENV === "development" ? ["error", "schema"] : false,
-  entities: [
-    User,
-    Organization,
-    CredentialRecord,
-    MultisigWallet,
-    MultisigTransaction,
-  ],
+  entities: [User, Organization, MultisigWallet, MultisigTransaction],
   migrations: [],
   subscribers: [],
 });

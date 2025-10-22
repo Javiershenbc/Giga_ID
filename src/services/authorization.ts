@@ -51,19 +51,9 @@ export class AuthorizationService {
   /**
    * Check if user is a Giga admin (has super-admin privileges)
    */
-  async isGigaAdmin(userId: string): Promise<boolean> {
-    const authContext = await this.getUserAuthContext(userId);
-    if (!authContext || !authContext.organizationId) return false;
-
-    // Check if user is associated with Giga organization and has admin role
-    if (authContext.role !== UserRole.ADMIN) return false;
-
-    const organization = await this.organizationRepository.findOne({
-      where: { id: authContext.organizationId },
-      select: ["id", "type"],
-    });
-
-    return organization?.type === OrganizationType.GIGA;
+  async isGigaAdmin(_userId: string): Promise<boolean> {
+    // Simplified: no Giga super-admin concept in Azure migration
+    return false;
   }
 
   /**
@@ -123,51 +113,7 @@ export class AuthorizationService {
       return true; // Allow creation of root organization
     }
 
-    // If user is not associated with any organization, they can still create if they will be the admin
-    // This allows the flow: Giga user creates Country Office → Country Office user creates Government → etc.
-    if (!authContext || !authContext.organizationId) {
-      console.log(
-        `[AUTH DEBUG] User not associated with any org, checking parent org`
-      );
-      // Check if the parent organization exists and is verified
-      const parentOrg = await this.organizationRepository.findOne({
-        where: { id: parentId },
-      });
-
-      console.log(`[AUTH DEBUG] Parent org:`, parentOrg);
-
-      if (!parentOrg || parentOrg.status !== OrganizationStatus.VERIFIED) {
-        console.log(`[AUTH DEBUG] Parent org not found or not verified`);
-        return false;
-      }
-
-      // Allow creation if the parent type matches the hierarchy rules
-      if (organizationType === OrganizationType.COUNTRY_OFFICE) {
-        const canCreate = parentOrg.type === OrganizationType.GIGA;
-        console.log(
-          `[AUTH DEBUG] Country Office creation (unassociated user): ${canCreate}`
-        );
-        return canCreate;
-      }
-
-      if (organizationType === OrganizationType.GOVERNMENT) {
-        const canCreate = parentOrg.type === OrganizationType.COUNTRY_OFFICE;
-        console.log(
-          `[AUTH DEBUG] Government creation (unassociated user): ${canCreate}`
-        );
-        return canCreate;
-      }
-
-      if (organizationType === OrganizationType.SCHOOL) {
-        const canCreate = parentOrg.type === OrganizationType.GOVERNMENT;
-        console.log(
-          `[AUTH DEBUG] School creation (unassociated user): ${canCreate}`
-        );
-        return canCreate;
-      }
-
-      return false;
-    }
+    if (!authContext || !authContext.organizationId) return false;
 
     // If user is associated with an organization, check if it's the parent AND user has appropriate role
     const userOrg = await this.organizationRepository.findOne({
@@ -182,12 +128,7 @@ export class AuthorizationService {
     }
 
     // Only ADMIN users can create child organizations
-    // Exception: Country Office STAFF can also create Government organizations
-    const hasRequiredRole =
-      authContext.role === UserRole.ADMIN ||
-      (userOrg.type === OrganizationType.COUNTRY_OFFICE &&
-        authContext.role === UserRole.STAFF &&
-        organizationType === OrganizationType.GOVERNMENT);
+    const hasRequiredRole = authContext.role === UserRole.ADMIN;
 
     if (!hasRequiredRole) {
       console.log(
@@ -231,11 +172,7 @@ export class AuthorizationService {
     userId: string,
     targetOrganizationId: string
   ): Promise<boolean> {
-    // Check if user is Giga admin first (super-admin privileges)
-    if (await this.isGigaAdmin(userId)) {
-      console.log(`[AUTH DEBUG] Giga admin can update any organization status`);
-      return true; // Giga admins can update any organization status
-    }
+    // No super-admin; require org admin
 
     const authContext = await this.getUserAuthContext(userId);
     if (!authContext || !authContext.organizationId) return false;
@@ -269,13 +206,7 @@ export class AuthorizationService {
     userId: string,
     issuerOrganizationId: string
   ): Promise<boolean> {
-    // Check if user is Giga admin first (super-admin privileges)
-    if (await this.isGigaAdmin(userId)) {
-      console.log(
-        `[AUTH DEBUG] Giga admin can issue credentials for any organization`
-      );
-      return true; // Giga admins can issue credentials for any organization
-    }
+    // Credential issuing removed with Azure migration; keep admin-only guard
 
     const authContext = await this.getUserAuthContext(userId);
     if (!authContext) return false;
@@ -291,10 +222,7 @@ export class AuthorizationService {
 
     if (!organization) return false;
 
-    const hasRequiredRole =
-      authContext.role === UserRole.ADMIN ||
-      (organization.type === OrganizationType.COUNTRY_OFFICE &&
-        authContext.role === UserRole.STAFF);
+    const hasRequiredRole = authContext.role === UserRole.ADMIN;
 
     if (!hasRequiredRole) return false;
 
@@ -306,14 +234,7 @@ export class AuthorizationService {
    * Get organizations that a user can manage
    */
   async getUserManagedOrganizations(userId: string): Promise<Organization[]> {
-    // Check if user is Giga admin first (super-admin privileges)
-    if (await this.isGigaAdmin(userId)) {
-      console.log(`[AUTH DEBUG] Giga admin can manage all organizations`);
-      // Return ALL organizations for Giga admins
-      return await this.organizationRepository.find({
-        relations: ["children"],
-      });
-    }
+    // No super-admin. Scope to user's org and children.
 
     const authContext = await this.getUserAuthContext(userId);
     if (!authContext || !authContext.organizationId) return [];
@@ -411,22 +332,17 @@ export class AuthorizationService {
   /**
    * Get user's DID by username
    */
-  async getUserDidByUsername(username: string): Promise<string | null> {
-    const user = await this.userRepository.findOne({
-      where: { username },
-      select: ["did"],
-    });
-    return user?.did || null;
+  async getUserDidByUsername(_username: string): Promise<string | null> {
+    // DID removed in Azure migration
+    return null;
   }
 
   /**
    * Get user by DID
    */
-  async getUserByDid(did: string): Promise<User | null> {
-    return await this.userRepository.findOne({
-      where: { did },
-      select: ["id", "username", "displayName", "did"],
-    });
+  async getUserByDid(_did: string): Promise<User | null> {
+    // DID removed in Azure migration
+    return null;
   }
 
   /**
@@ -461,7 +377,7 @@ export class AuthorizationService {
           id: user.id,
           username: user.username,
           displayName: user.displayName,
-          role: user.organizationRole || UserRole.MEMBER,
+          role: user.organizationRole || UserRole.USER,
         })),
       });
     }

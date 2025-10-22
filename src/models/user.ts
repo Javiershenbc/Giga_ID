@@ -13,14 +13,7 @@ import { Organization } from "./organization.js";
 
 export enum UserRole {
   ADMIN = "admin",
-  STAFF = "staff",
-  MEMBER = "member",
-  STUDENT = "student",
-}
-
-export enum AuthMethod {
-  PASSWORD = "password",
-  // HYBRID = "hybrid"          // Commented out for future use
+  USER = "user",
 }
 
 @Entity()
@@ -37,39 +30,13 @@ export class User {
   @Column()
   displayName!: string;
 
-  @Column({ nullable: true })
-  did!: string;
-
-  // Authentication method and password
-  @Column({
-    type: "varchar",
-    enum: AuthMethod,
-    default: AuthMethod.PASSWORD,
-  })
-  authMethod!: AuthMethod;
+  // Azure AD identity
+  @Column({ unique: true })
+  azureAdObjectId!: string; // Azure AD Object ID (oid)
 
   @Column({ nullable: true })
-  passwordHash?: string;
-
-  @Column("text", { nullable: true })
-  credentials!: string;
-
-  @Column({ nullable: true })
-  currentChallenge?: string;
-
-  // Backup related fields
-  @Column({ nullable: true })
-  backupEncryptedCredentials?: string;
-
-  @Column({ nullable: true })
-  backupSalt?: string;
-
-  @Column({ nullable: true })
-  backupIv?: string;
-
-  // Flag to indicate if backup is enabled
-  @Column({ default: false })
-  hasBackup!: boolean;
+  azureAdTenantId?: string; // Azure AD Tenant ID
+  // Note: Password/WebAuthn/DID fields removed in Azure AD migration
 
   // Organization association
   @Column({ nullable: true })
@@ -86,10 +53,6 @@ export class User {
   })
   organizationRole?: UserRole;
 
-  // Hierarchical credentials received by this user
-  @Column("text", { nullable: true })
-  hierarchicalCredentials?: string; // JSON array of credential IDs
-
   // Multisig wallet association
   @Column({ nullable: true })
   multisigWalletId?: string;
@@ -98,7 +61,7 @@ export class User {
   // Bidirectional relationship removed to avoid circular dependencies
 
   @Column({ nullable: true })
-  signerPrivateKey?: string; // EOA private key for VC signing (encrypted)
+  signerPrivateKey?: string; // EOA private key (if used)
 
   @Column({ nullable: true })
   signerAddress?: string; // EOA address for day-to-day operations

@@ -4,7 +4,6 @@ import {
   OrganizationType,
   OrganizationStatus,
 } from "../models/organization.js";
-import { ConfiguredAgent } from "../agent/setup.js";
 import { AppDataSource } from "../data-source.js";
 import { logger } from "../utils/logger.js";
 
@@ -26,10 +25,8 @@ export interface OrganizationHierarchy {
 
 export class OrganizationService {
   private organizationRepository: Repository<Organization>;
-  private agent: ConfiguredAgent;
 
-  constructor(agent: ConfiguredAgent, dataSource?: DataSource) {
-    this.agent = agent;
+  constructor(dataSource?: DataSource) {
     // Use provided dataSource or fall back to AppDataSource for backward compatibility
     if (dataSource) {
       this.organizationRepository = dataSource.getRepository(Organization);
@@ -48,19 +45,10 @@ export class OrganizationService {
       // Validate hierarchy rules
       await this.validateHierarchy(params.type, params.parentId);
 
-      // Create DID for the organization
-      const identifier = await this.agent.didManagerCreate({
-        provider: "did:ethr",
-        alias: `${params.type}-${params.name
-          .toLowerCase()
-          .replace(/\s+/g, "-")}`,
-      });
-
       // Create organization record
       const organization = this.organizationRepository.create({
         name: params.name,
         type: params.type,
-        did: identifier.did,
         description: params.description,
         country: params.country,
         region: params.region,
@@ -81,7 +69,7 @@ export class OrganizationService {
       );
 
       logger.info(
-        `Created organization: ${savedOrganization.name} with DID: ${savedOrganization.did}`
+        `Created organization: ${savedOrganization.name} (${savedOrganization.type})`
       );
       return savedOrganization;
     } catch (error) {
@@ -154,7 +142,6 @@ export class OrganizationService {
         "name",
         "type",
         "status",
-        "did",
         "country",
         "region",
         "parentId",
@@ -164,24 +151,7 @@ export class OrganizationService {
     });
   }
 
-  /**
-   * Get organization by DID
-   */
-  async getOrganizationByDid(did: string): Promise<Organization | null> {
-    return await this.organizationRepository.findOne({
-      where: { did },
-      select: [
-        "id",
-        "name",
-        "type",
-        "status",
-        "did",
-        "country",
-        "region",
-        "parentId",
-      ],
-    });
-  }
+  // getOrganizationByDid removed in Azure AD migration
 
   /**
    * Get all organizations of a specific type with minimal data
@@ -191,16 +161,7 @@ export class OrganizationService {
   ): Promise<Organization[]> {
     return await this.organizationRepository.find({
       where: { type },
-      select: [
-        "id",
-        "name",
-        "type",
-        "status",
-        "did",
-        "country",
-        "region",
-        "parentId",
-      ],
+      select: ["id", "name", "type", "status", "country", "region", "parentId"],
       order: { createdAt: "ASC" },
     });
   }

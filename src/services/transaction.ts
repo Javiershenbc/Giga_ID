@@ -1,5 +1,4 @@
 import { ethers } from "ethers";
-import { ConfiguredAgent } from "../agent/setup.js";
 import { env } from "../config/env.js";
 import { DataSource } from "typeorm";
 import { User } from "../models/user.js";
@@ -28,18 +27,16 @@ export interface TransactionResult {
 }
 
 export class TransactionService {
-  private agent: ConfiguredAgent;
   private provider: ethers.JsonRpcProvider;
   private userRepository: any;
   private keyManager: KeyManagerService;
 
-  constructor(agent: ConfiguredAgent, dbConnection: DataSource) {
-    this.agent = agent;
+  constructor(_agent: any, dbConnection: DataSource) {
     this.provider = new ethers.JsonRpcProvider(
       `https://${env.ETH_NETWORK}.infura.io/v3/${env.INFURA_PROJECT_ID}`
     );
     this.userRepository = dbConnection.getRepository(User);
-    this.keyManager = new KeyManagerService(agent, dbConnection);
+    this.keyManager = new KeyManagerService(dbConnection);
     try {
       const secretFp = ethers
         .keccak256(ethers.toUtf8Bytes(env.SECRET_KEY || ""))

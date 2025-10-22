@@ -1,17 +1,14 @@
 import "reflect-metadata";
 import { DataSource } from "typeorm";
-import {
-  DIDStore,
-  Entities,
-  KeyStore,
-  PrivateKeyStore,
-  migrations,
-} from "@veramo/data-store";
+// Veramo data-store removed in Azure AD migration
 import { User } from "../models/user.js";
 import { Organization } from "../models/organization.js";
-import { CredentialRecord } from "../models/credential-record.js";
+// CredentialRecord removed
 import { APIKey } from "../models/api-key.js";
-import { MultisigWallet, MultisigTransaction } from "../models/multisig-wallet.js";
+import {
+  MultisigWallet,
+  MultisigTransaction,
+} from "../models/multisig-wallet.js";
 import { env } from "./env.js";
 import { logger } from "../utils/logger.js";
 
@@ -27,19 +24,11 @@ export async function initializeDatabase(): Promise<DataSource> {
   dataSource = new DataSource({
     type: "sqlite",
     database: dbName,
-    entities: [
-      ...Entities,
-      User,
-      Organization,
-      CredentialRecord,
-      APIKey,
-      MultisigWallet,
-      MultisigTransaction,
-    ],
+    entities: [User, Organization, APIKey, MultisigWallet, MultisigTransaction],
     synchronize: true,
     logging: env.NODE_ENV === "development" ? ["error", "schema"] : false,
-    migrations,
-    migrationsRun: true,
+    migrations: [],
+    migrationsRun: false,
   });
 
   try {

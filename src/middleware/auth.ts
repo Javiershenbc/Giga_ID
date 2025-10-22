@@ -1,115 +1,110 @@
 import { Request, Response, NextFunction } from "express";
-import { JWTService, JWTPayload } from "../services/jwt.js";
+import passport from "passport";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { BearerStrategy } = require("passport-azure-ad");
+import { azureAdConfig } from "../config/azure-ad.js";
+import { AppDataSource } from "../data-source.js";
+import { User } from "../models/user.js";
 
 export interface AuthenticatedRequest extends Request {
   user?: {
-    id: string;
-    username: string;
+    id: string; // local DB user id
+    username: string; // preferred_username/email
     displayName: string;
-    did: string;
-    authMethod: string;
+    azureAdObjectId: string; // Azure AD oid
+    roles: string[];
   };
-  authType?: "session" | "jwt";
+  authType?: "azure";
 }
 
-/**
- * Middleware to check if user is authenticated via session or JWT
- */
+// Configure Azure AD Bearer strategy
+const bearerStrategy = new BearerStrategy(
+  {
+    identityMetadata: azureAdConfig.identityMetadata,
+    clientID: azureAdConfig.clientID,
+    validateIssuer: azureAdConfig.validateIssuer,
+    loggingLevel: azureAdConfig.loggingLevel,
+    audience: azureAdConfig.audience,
+    passReqToCallback: false,
+  },
+  async (token: any, done: Function) => {
+    try {
+      const userRepository = AppDataSource.getRepository(User);
+      const azureAdObjectId: string = token.oid;
+      const preferredUsername: string =
+        token.preferred_username || token.upn || "";
+      const displayName: string =
+        token.name || preferredUsername || azureAdObjectId;
+      const tenantId: string | undefined = token.tid;
+      let user = await userRepository.findOne({ where: { azureAdObjectId } });
+      if (!user) {
+        user = userRepository.create({
+          username: preferredUsername || azureAdObjectId,
+          email: preferredUsername || `${azureAdObjectId}@unknown`,
+          displayName,
+          azureAdObjectId,
+          azureAdTenantId: tenantId,
+        });
+        user = await userRepository.save(user);
+      } else {
+        // keep display info updated
+        user.displayName = displayName;
+        user.azureAdTenantId = tenantId;
+        await userRepository.save(user);
+      }
+
+      return done(null, {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        azureAdObjectId,
+        roles: Array.isArray(token.roles) ? token.roles : [],
+      });
+    } catch (err) {
+      return done(err, null);
+    }
+  }
+);
+
+passport.use(bearerStrategy as any);
+
 export const requireAuth = (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ) => {
-  // First, try JWT authentication
-  const authHeader = req.headers.authorization;
-  const token = JWTService.extractTokenFromHeader(authHeader);
-
-  if (token) {
-    try {
-      const payload: JWTPayload = JWTService.verifyToken(token);
-      req.user = {
-        id: payload.userId,
-        username: payload.username,
-        displayName: payload.username, // Could be enhanced to store displayName in JWT
-        did: "", // Would be populated from database if needed
-        authMethod: payload.authMethod,
-      };
-      req.authType = "jwt";
+  return passport.authenticate(
+    "oauth-bearer",
+    { session: false },
+    (err: any, user: any) => {
+      if (err || !user) {
+        return res
+          .status(401)
+          .json({ success: false, error: "Authentication required" });
+      }
+      req.user = user;
+      req.authType = "azure";
       return next();
-    } catch (error) {
-      return res.status(401).json({
-        success: false,
-        error: "Invalid or expired token",
-        message:
-          error instanceof Error ? error.message : "Authentication failed",
-      });
     }
-  }
-
-  // Fallback to session authentication
-  if (!req.session.isLoggedIn || !req.session.userId) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required",
-      message:
-        "Please log in to access this resource or provide a valid JWT token",
-    });
-  }
-
-  // Add user info to request for use in controllers
-  req.user = {
-    id: req.session.userId,
-    username: req.session.username || "",
-    displayName: req.session.username || "",
-    did: "", // This would be populated from the database if needed
-    authMethod: "webauthn", // Session-based is typically WebAuthn
-  };
-  req.authType = "session";
-
-  next();
+  )(req, res, next);
 };
 
-/**
- * Middleware to check if user is authenticated (optional)
- * Adds user info to request if available but doesn't block access
- */
 export const optionalAuth = (
   req: AuthenticatedRequest,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ) => {
-  // Try JWT first
-  const authHeader = req.headers.authorization;
-  const token = JWTService.extractTokenFromHeader(authHeader);
-
-  if (token) {
-    try {
-      const payload: JWTPayload = JWTService.verifyToken(token);
-      req.user = {
-        id: payload.userId,
-        username: payload.username,
-        displayName: payload.username,
-        did: "",
-        authMethod: payload.authMethod,
-      };
-      req.authType = "jwt";
+  passport.authenticate(
+    "oauth-bearer",
+    { session: false },
+    (_err: any, user: any) => {
+      if (user) {
+        req.user = user as any;
+        req.authType = "azure";
+      }
       return next();
-    } catch (error) {
-      // JWT failed, continue to session check
     }
-  }
-
-  // Fallback to session
-  if (req.session.isLoggedIn && req.session.userId) {
-    req.user = {
-      id: req.session.userId,
-      username: req.session.username || "",
-      displayName: req.session.username || "",
-      did: "",
-      authMethod: "webauthn",
-    };
-    req.authType = "session";
-  }
-
-  next();
+  )(req, _res, next);
 };

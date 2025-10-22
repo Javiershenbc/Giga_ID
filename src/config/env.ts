@@ -12,35 +12,25 @@ export const env = cleanEnv(process.env, {
     default: "development",
   }),
 
-  // Security
-  SECRET_KEY: str({
-    desc: "Secret key for encryption",
-    default:
-      process.env.NODE_ENV === "production"
-        ? undefined // Force explicit setting in production
-        : "dev-secret-key-change-in-production",
+  // Azure AD
+  AZURE_AD_TENANT_ID: str(),
+  AZURE_AD_CLIENT_ID: str(),
+  AZURE_AD_CLIENT_SECRET: str({ default: "" }),
+  AZURE_AD_AUTHORITY: str({ default: "https://login.microsoftonline.com" }),
+  AZURE_AD_REDIRECT_URI: str({
+    default: "http://localhost:3000/api/auth/callback",
   }),
-  SESSION_SECRET: str({
-    default:
-      process.env.NODE_ENV === "production"
-        ? undefined // Force explicit setting in production
-        : "dev-session-secret-change-in-production",
-  }),
+  AZURE_AD_SCOPES: str({ default: "openid profile email offline_access" }),
+  // Signing secret (backwards compatibility)
+  SECRET_KEY: str({ default: "" }),
   CORS_ORIGIN: str({ default: "http://localhost:3000" }),
 
   // Database
   DB_NAME: str({ default: "database.sqlite" }),
 
   // Ethereum
-  INFURA_PROJECT_ID: str({
-    desc: "Infura project ID for Ethereum network access",
-    default: "",
-  }),
-  ETH_NETWORK: str({
-    choices: ["mainnet", "goerli", "sepolia", "base", "base-sepolia"],
-    default: "base-sepolia",
-  }),
-  // Optional explicit RPC URL override (required for Base networks)
+  INFURA_PROJECT_ID: str({ default: "" }),
+  ETH_NETWORK: str({ default: "sepolia" }),
   RPC_URL: str({ default: "" }),
 
   // Rate Limiting - More secure defaults
@@ -54,10 +44,4 @@ export const env = cleanEnv(process.env, {
   RP_NAME: str({ default: "GigaID" }),
   RP_ID: str({ default: "localhost" }),
   ENABLE_BLOCKCHAIN: bool({ default: false }),
-  JWT_SECRET: str({
-    default:
-      process.env.NODE_ENV === "production"
-        ? undefined // Force explicit setting in production
-        : "dev-jwt-secret-change-in-production",
-  }),
 });

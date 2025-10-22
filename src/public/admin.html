@@ -25,20 +25,10 @@
     <main class="container">
       <section class="card" id="loginCard">
         <h2>Sign in</h2>
-        <div class="grid-2">
-          <div class="field">
-            <label for="username">Username</label>
-            <input id="username" type="text" placeholder="demo_user" />
-          </div>
-          <div class="field">
-            <label for="password">Password</label>
-            <input id="password" type="password" placeholder="••••••••" />
-          </div>
-        </div>
         <div class="row">
-          <button id="loginBtn" class="btn">Login</button>
+          <button id="msLoginBtn" class="btn">Login with Microsoft</button>
         </div>
-        <p class="hint">After login, actions and data panels will unlock.</p>
+        <p class="hint">You will be redirected to Microsoft to sign in.</p>
       </section>
 
       <section class="grid-3" id="infoGrid" style="display: none">
@@ -46,8 +36,9 @@
           <h3>Account</h3>
           <div class="kv"><span>User</span><code id="kvUser">-</code></div>
           <div class="kv"><span>Email</span><code id="kvEmail">-</code></div>
-          <div class="kv"><span>DID</span><code id="kvDID">-</code></div>
-          <div class="kv"><span>Auth</span><code id="kvAuth">-</code></div>
+          <div class="kv">
+            <span>Auth</span><code id="kvAuth">azure-ad</code>
+          </div>
           <div class="kv">
             <span>Signer EOA</span><code id="kvSigner">-</code>
           </div>

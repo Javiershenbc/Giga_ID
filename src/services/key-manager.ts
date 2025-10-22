@@ -1,4 +1,3 @@
-import { ConfiguredAgent } from "../agent/setup.js";
 import { DataSource } from "typeorm";
 import { User } from "../models/user.js";
 import { ethers } from "ethers";
@@ -8,16 +7,13 @@ import { env } from "../config/env.js";
 import { MultisigWallet } from "../models/multisig-wallet.js";
 
 export class KeyManagerService {
-  private agent: ConfiguredAgent;
   private userRepository: any;
   private multisigService?: MultisigWalletService;
   private provider: ethers.JsonRpcProvider;
 
-  constructor(agent: ConfiguredAgent, dbConnection: DataSource) {
-    this.agent = agent;
+  constructor(dbConnection: DataSource) {
     this.userRepository = dbConnection.getRepository(User);
-    // Initialize multisig service if needed
-    this.multisigService = new MultisigWalletService(agent, dbConnection);
+    this.multisigService = new MultisigWalletService({} as any, dbConnection);
     this.provider = new ethers.JsonRpcProvider(
       `https://${env.ETH_NETWORK}.infura.io/v3/${env.INFURA_PROJECT_ID}`
     );
@@ -31,21 +27,14 @@ export class KeyManagerService {
     userId: string,
     transaction: any
   ): Promise<string> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-
-    if (!user || !user.did) {
-      throw new Error("User DID not found");
-    }
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new Error("User not found");
 
     try {
-      // Check if user has multisig enabled
       if (user.isMultisigEnabled && user.signerPrivateKey) {
         return await this.signWithEOASigner(user, transaction);
-      } else {
-        return await this.signWithVeramo(user, transaction);
       }
+      throw new Error("No signing method available for this user");
     } catch (error) {
       logger.error("Error signing transaction:", error);
       throw new Error(
@@ -60,8 +49,15 @@ export class KeyManagerService {
    * Get ethers.js Wallet signer for the user's EOA (multisig users only)
    */
   async getEOASigner(userId: string): Promise<ethers.Wallet | null> {
-    const user: User | null = await this.userRepository.findOne({ where: { id: userId } });
-    if (!user || !user.isMultisigEnabled || !user.signerPrivateKey || !this.multisigService) {
+    const user: User | null = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+    if (
+      !user ||
+      !user.isMultisigEnabled ||
+      !user.signerPrivateKey ||
+      !this.multisigService
+    ) {
       return null;
     }
     const privateKey = await this.multisigService.decryptSignerPrivateKey(
@@ -99,55 +95,20 @@ export class KeyManagerService {
     // Sign the transaction
     const signedTx = await signerWallet.signTransaction(cleanTransaction);
 
-    logger.blockchain(
-      `✅ Transaction signed with EOA signer: ${user.signerAddress}`
-    );
+    logger.blockchain(`✅ Transaction signed with EOA signer`);
     return signedTx;
   }
 
   /**
-   * Sign transaction using Veramo (for non-multisig users)
-   */
-  private async signWithVeramo(user: User, transaction: any): Promise<string> {
-    // Get the DID identifier from Veramo
-    const identifier = await this.agent.didManagerGet({ did: user.did });
-
-    if (!identifier.keys || identifier.keys.length === 0) {
-      throw new Error("No keys found for user DID");
-    }
-
-    // Get the first key (usually the controller key)
-    const keyRef = identifier.keys[0];
-    const keyId = keyRef.kid;
-
-    logger.blockchain(
-      `🔐 Signing transaction with Veramo KeyManager using key: ${keyId}`
-    );
-
-    // CORRECT VERAMO APPROACH: Use keyManagerSignEthTX
-    // Note: Remove 'from' field as Veramo will add it automatically based on the key
-    const { from, ...cleanTransaction } = transaction;
-
-    // Temporarily use any to bypass TypeScript issues while testing
-    const signedTx = await (this.agent as any).keyManagerSignEthTX({
-      kid: keyId,
-      transaction: cleanTransaction,
-    });
-
-    logger.blockchain(`✅ Transaction signed successfully with Veramo`);
-    return signedTx;
-  }
-
-  /**
-   * Get user's Ethereum address - returns signer address for multisig users, DID address for others
+   * Get user's Ethereum address - returns signer address for multisig users
    */
   async getUserEthereumAddress(userId: string): Promise<string> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
     });
 
-    if (!user || !user.did) {
-      throw new Error("User DID not found");
+    if (!user) {
+      throw new Error("User not found");
     }
 
     // For multisig users, return the signer address (EOA used for transactions)
@@ -158,45 +119,10 @@ export class KeyManagerService {
       return user.signerAddress;
     }
 
-    // For non-multisig users, resolve DID to get Ethereum address
-    return await this.getDIDEthereumAddress(user.did);
+    throw new Error("User does not have an EOA signer configured");
   }
 
-  /**
-   * Get the Ethereum address associated with a DID (multisig controller address)
-   */
-  async getDIDEthereumAddress(did: string): Promise<string> {
-    // Resolve DID to get Ethereum address
-    const didDoc = await this.agent.resolveDid({ didUrl: did });
-
-    // Extract Ethereum address from DID document
-    let ethAddress: string = "";
-
-    if (didDoc.didDocument?.verificationMethod) {
-      for (const method of didDoc.didDocument.verificationMethod) {
-        if (method.blockchainAccountId) {
-          const blockchainId = method.blockchainAccountId;
-          logger.blockchain(`Found blockchainAccountId: ${blockchainId}`);
-
-          // Format is usually "eip155:1:0x..." or "eip155:11155111:0x..." (for Sepolia)
-          const parts = blockchainId.split(":");
-          if (parts.length >= 3 && parts[parts.length - 1].startsWith("0x")) {
-            ethAddress = parts[parts.length - 1];
-            logger.blockchain(
-              `Extracted address from blockchainAccountId: ${ethAddress}`
-            );
-            break;
-          }
-        }
-      }
-    }
-
-    if (!ethAddress) {
-      throw new Error("Could not extract Ethereum address from DID document");
-    }
-
-    return ethAddress;
-  }
+  // DID resolution removed in Azure migration
 
   /**
    * Get multisig wallet address for a user (if enabled)
@@ -222,117 +148,17 @@ export class KeyManagerService {
   /**
    * Sign a Verifiable Credential using the appropriate key
    */
-  async signVerifiableCredential(
-    userId: string,
-    credentialPayload: any
-  ): Promise<string> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-
-    if (!user || !user.did) {
-      throw new Error("User DID not found");
-    }
-
-    try {
-      // For multisig users, use EOA signer for VC signing
-      if (user.isMultisigEnabled && user.signerPrivateKey) {
-        return await this.signCredentialWithEOA(user, credentialPayload);
-      } else {
-        return await this.signCredentialWithVeramo(user, credentialPayload);
-      }
-    } catch (error) {
-      logger.error("Error signing verifiable credential:", error);
-      throw error;
-    }
-  }
+  // VC signing removed in Azure migration
 
   /**
    * Sign credential with EOA signer (for multisig users)
    */
-  private async signCredentialWithEOA(
-    user: User,
-    credentialPayload: any
-  ): Promise<string> {
-    if (!user.signerPrivateKey || !this.multisigService) {
-      throw new Error("No signer private key available");
-    }
-
-    logger.blockchain(
-      `🔐 Signing credential with EOA signer for user: ${user.username}`
-    );
-
-    // Decrypt the signer private key
-    const privateKey = await this.multisigService.decryptSignerPrivateKey(
-      user.signerPrivateKey
-    );
-
-    // Create a JWT payload
-    const payload = {
-      ...credentialPayload,
-      iss: user.did, // Issuer is still the DID
-      sub: credentialPayload.credentialSubject?.id || user.did,
-      iat: Math.floor(Date.now() / 1000),
-      exp: credentialPayload.expirationDate
-        ? Math.floor(
-            new Date(credentialPayload.expirationDate).getTime() / 1000
-          )
-        : undefined,
-    };
-
-    // Sign with EOA private key using ethers
-    const wallet = new ethers.Wallet(privateKey);
-    const message = JSON.stringify(payload);
-    const signature = await wallet.signMessage(message);
-
-    // Create a simple JWT-like structure (this is a simplified approach)
-    // In production, you might want to use proper JWT libraries
-    const header = {
-      typ: "JWT",
-      alg: "ES256K", // secp256k1 signature
-      kid: user.signerAddress,
-    };
-
-    const encodedHeader = Buffer.from(JSON.stringify(header)).toString(
-      "base64url"
-    );
-    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
-      "base64url"
-    );
-    const encodedSignature = Buffer.from(signature).toString("base64url");
-
-    const jwt = `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
-
-    logger.blockchain(
-      `✅ Credential signed with EOA signer: ${user.signerAddress}`
-    );
-    return jwt;
-  }
+  // VC signing removed in Azure migration
 
   /**
    * Sign credential with Veramo (for non-multisig users)
    */
-  private async signCredentialWithVeramo(
-    user: User,
-    credentialPayload: any
-  ): Promise<string> {
-    // Use Veramo's credential signing
-    const credential = await this.agent.createVerifiableCredential({
-      credential: credentialPayload,
-      proofFormat: "jwt",
-    });
-
-    logger.blockchain(
-      `✅ Credential signed with Veramo for user: ${user.username}`
-    );
-
-    // Extract JWT from Veramo response
-    if (typeof credential.proof === "object" && credential.proof.jwt) {
-      return credential.proof.jwt;
-    }
-
-    throw new Error("Failed to extract JWT from Veramo credential");
-  }
+  // VC signing removed in Azure migration
 
   /**
    * Check if we can access the user's key for signing
@@ -343,16 +169,15 @@ export class KeyManagerService {
         where: { id: userId },
       });
 
-      if (!user || !user.did) return false;
+      if (!user) return false;
 
       // For multisig users, check if they have signer key
       if (user.isMultisigEnabled) {
         return !!user.signerPrivateKey;
       }
 
-      // For non-multisig users, check Veramo keys
-      const identifier = await this.agent.didManagerGet({ did: user.did });
-      return identifier.keys && identifier.keys.length > 0;
+      // Non-multisig users: no signing capability available
+      return false;
     } catch (error) {
       logger.error("Error checking signing capability:", error);
       return false;
@@ -450,7 +275,7 @@ export class KeyManagerService {
 
       logger.debug(`🔍 Signing Capability Check:`);
       logger.debug(`   User ID: ${userId}`);
-      logger.debug(`   DID: ${user.did}`);
+      // No DID after Azure migration
       logger.debug(`   Can Sign: ${canSign ? "✅ YES" : "❌ NO"}`);
 
       return canSign;

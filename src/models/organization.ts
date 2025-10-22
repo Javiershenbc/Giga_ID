@@ -45,8 +45,9 @@ export class Organization {
   })
   status!: OrganizationStatus;
 
-  @Column({ unique: true })
-  did!: string;
+  // Azure AD Group mapping (optional)
+  @Column({ nullable: true })
+  azureAdGroupId?: string;
 
   @Column({ nullable: true })
   description?: string;
@@ -71,9 +72,7 @@ export class Organization {
   @OneToMany(() => Organization, (org) => org.parent)
   children!: Organization[];
 
-  // Credential that authorizes this organization to issue credentials
-  @Column("text", { nullable: true })
-  authorizationCredential?: string;
+  // Authorization credential removed in Azure AD migration
 
   // Metadata for additional organization info
   @Column("text", { nullable: true })
